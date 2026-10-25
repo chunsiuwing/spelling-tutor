@@ -19,14 +19,11 @@
     queue: [],
     idx: 0,
     round: 0,
-    attempt: '',
-    raw: '',
+    attempt: [],
+    bank: [],
     phase: 'setup',
     results: [],
     log: [],
-    rec: null,
-    pttRec: null,
-    pttActive: false,
     token: 0,
     lastCoach: null,
     praiseCount: 0
@@ -205,46 +202,56 @@
     $('btnHint').disabled = !S.lastCoach || !S.lastCoach.speakHint;
   }
 
-  /* Letters are only ever dots until the student has committed. */
-  function renderAttempt(res, coach) {
-    var el = $('attempt');
-    var html = '';
-    var i;
+  function shuffle(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+    }
+    return a;
+  }
 
-    if (S.phase === 'presenting' || S.phase === 'listening') {
-      if (!S.attempt.length) {
-        html = '<span class="tile rest">?</span><span class="tile rest">?</span><span class="tile rest">?</span>';
+  function initBank(word) {
+    var letters = word.toUpperCase().split('');
+    var pool = letters.slice();
+    /* add 2-3 extra random distractor letters for fun */
+    var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    for (var i = 0; i < 3; i++) {
+      pool.push(alphabet.charAt(Math.floor(Math.random() * alphabet.length)));
+    }
+    S.bank = shuffle(pool).map(function (ch, idx) {
+      return { id: idx, ch: ch, used: false };
+    });
+    S.attempt = [];
+  }
+
+  function renderHangman() {
+    var attemptBox = $('attempt');
+    var bankBox = $('bank');
+    var targetLen = targetWord().length;
+
+    var attemptHtml = '';
+    for (var i = 0; i < targetLen; i++) {
+      var slot = S.attempt[i];
+      if (slot) {
+        attemptHtml += '<span class="tile good" data-idx="' + i + '">' + esc(slot.ch) + '</span>';
       } else {
-        for (i = 0; i < S.attempt.length; i++) html += '<span class="tile" data-live="1">&bull;</span>';
+        attemptHtml += '<span class="tile rest">&bull;</span>';
       }
-      el.innerHTML = html;
-      el.className = 'attempt';
-      return;
     }
+    attemptBox.innerHTML = attemptHtml;
 
-    /* answered — show what the microphone caught, or the target once
-     * it has been given away as the final hint                    */
-    var revealed = !!(coach && coach.reveal);
-    var word = revealed ? ((res && res.target) || '') : (S.attempt || '');
-
-    if (!word) {
-      el.innerHTML = '<span class="tile rest">?</span>';
-      el.className = 'attempt';
-      return;
+    var bankHtml = '';
+    for (var j = 0; j < S.bank.length; j++) {
+      var b = S.bank[j];
+      bankHtml += '<button class="tile-btn' + (b.used ? ' used' : '') + '" type="button" draggable="true" data-id="' + b.id + '">' + esc(b.ch) + '</button>';
     }
+    bankBox.innerHTML = bankHtml;
 
-    var p = (res && res.prefix) || 0;
-    var s = (res && res.suffix) || 0;
-
-    for (i = 0; i < word.length; i++) {
-      var cls = 'tile';
-      if (revealed) cls += (res && res.correct) ? ' good' : ' target';
-      else if (res && !res.correct) cls += (i < p || (word.length - i) <= s) ? ' good' : ' bad';
-      else cls += ' good';
-      html += '<span class="' + cls + '">' + esc(word.charAt(i)) + '</span>';
-    }
-    el.innerHTML = html;
-    el.className = 'attempt ' + ((coach && coach.correct) ? 'ok' : 'no');
+    var btn = $('btnCheck');
+    var filled = S.attempt.length === targetLen;
+    btn.disabled = !filled;
+    btn.classList.toggle('hot', filled);
   }
 
   function setFeedback(html, tone) {
@@ -308,11 +315,8 @@
 
   function presentWord() {
     S.round = 0;
-    S.attempt = '';
-    S.raw = '';
     S.lastCoach = null;
-    var my = ++S.token;
-    stopRec();
+    initBank(targetWord());
 
     updateProgress();
     setFeedback('');
@@ -320,42 +324,34 @@
     $('hintPill').hidden = true;
     $('hearState').textContent = 'Listen carefully — the word is read once.';
     setPhase('presenting');
-    renderAttempt();
+    renderHangman();
 
     if (!Speech.ttsOk) {
-      showBanner('micWarn', 'This browser cannot speak. You will see the status but hear no voice.');
+      showBanner('micWarn', 'Speech output is not available in this browser.');
     }
 
     var word = targetWord();
     Speech.speak(word, { rate: 0.82 })
       .then(function () { return delay(700); })
       .then(function () {
-        if (my !== S.token) return;                 // skipped or quit meanwhile
         setPhase('listening');
-        renderAttempt();
-        startRec(my);
+        renderHangman();
       });
   }
 
   function check() {
     if (S.phase !== 'listening') return;
-    var my = S.token;
     setPhase('checking');
-    stopRec();
 
     var target = targetWord();
-    if (!S.attempt) {                              /* said the whole word? */
-      var raw = (S.raw || '').replace(/[^a-zA-Z]/g, '').toUpperCase();
-      if (raw === target.toUpperCase()) S.attempt = raw;
-    }
+    var attemptStr = S.attempt.map(function (x) { return x.ch; }).join('');
 
-    var res = L.judge(S.attempt, target);
+    var res = L.judge(attemptStr, target);
     var coach = L.coach(res, S.round + 1);
     S.lastCoach = coach;
 
     setPhase('feedback');
     setHintPill(res, S.round + 1);
-    renderAttempt(res, coach);
 
     var screen = coach.screen;
     if (coach.correct) {
@@ -364,7 +360,7 @@
         (S.round + 1) + (S.round ? ' tries' : ' try'));
       S.praiseCount++;
     } else if (res.empty) {
-      pushLog('–', 'nothing heard', 'warn', '');
+      pushLog('–', 'nothing placed', 'warn', '');
     } else {
       pushLog('✗', res.attempt, 'bad', L.describeWrong(res));
     }
@@ -374,17 +370,14 @@
     Speech.speak(coach.speech, { rate: coach.correct ? 0.95 : 0.8 })
       .then(function () { return delay(450); })
       .then(function () {
-        if (my !== S.token) return;
         if (coach.correct) { S.results.push({ word: target, status: 'ok' }); nextWord(); return; }
         if (coach.advance) { S.results.push({ word: target, status: 'reveal' }); nextWord(); return; }
         S.round++;
-        S.attempt = '';
-        S.raw = '';
+        initBank(target);
         setFeedback('');
         setHintPill(null);
         setPhase('listening');
-        renderAttempt();
-        startRec(my);
+        renderHangman();
       });
   }
 
@@ -639,7 +632,70 @@
     btn.ontouchend = function (e) { endPtt(e); };
     btn.ontouchcancel = function (e) { endPtt(e); };
   }
-  function bind() {
+  function setupHangman() {
+    var bankBox = $('bank');
+    var attemptBox = $('attempt');
+
+    bankBox.addEventListener('click', function (e) {
+      if (S.phase !== 'listening') return;
+      var btn = e.target.closest ? e.target.closest('.tile-btn') : null;
+      if (!btn || btn.classList.contains('used')) return;
+      var id = parseInt(btn.getAttribute('data-id'), 10);
+      var item = S.bank.find(function (x) { return x.id === id; });
+      if (!item) return;
+
+      if (S.attempt.length < targetWord().length) {
+        item.used = true;
+        S.attempt.push(item);
+        renderHangman();
+      }
+    });
+
+    attemptBox.addEventListener('click', function (e) {
+      if (S.phase !== 'listening') return;
+      var tile = e.target.closest ? e.target.closest('.tile') : null;
+      if (!tile || tile.classList.contains('rest')) return;
+      var idx = parseInt(tile.getAttribute('data-idx'), 10);
+      if (isNaN(idx) || !S.attempt[idx]) return;
+
+      var removed = S.attempt.splice(idx, 1)[0];
+      if (removed) {
+        var ref = S.bank.find(function (x) { return x.id === removed.id; });
+        if (ref) ref.used = false;
+        renderHangman();
+      }
+    });
+
+    $('btnClearBank').onclick = function () {
+      if (S.phase !== 'listening') return;
+      S.attempt = [];
+      S.bank.forEach(function (x) { x.used = false; });
+      renderHangman();
+    };
+
+    /* Drag and drop support */
+    bankBox.addEventListener('dragstart', function (e) {
+      var btn = e.target.closest ? e.target.closest('.tile-btn') : null;
+      if (!btn || btn.classList.contains('used')) return;
+      e.dataTransfer.setData('text/plain', btn.getAttribute('data-id'));
+    });
+
+    attemptBox.addEventListener('dragover', function (e) { e.preventDefault(); });
+    attemptBox.addEventListener('drop', function (e) {
+      e.preventDefault();
+      if (S.phase !== 'listening') return;
+      var idStr = e.dataTransfer.getData('text/plain');
+      var id = parseInt(idStr, 10);
+      var item = S.bank.find(function (x) { return x.id === id; });
+      if (!item || item.used) return;
+
+      if (S.attempt.length < targetWord().length) {
+        item.used = true;
+        S.attempt.push(item);
+        renderHangman();
+      }
+    });
+  }
     $('btnPick').onclick = function () { $('filePdf').click(); };
     $('drop').onclick = function (e) { if (e.target.tagName !== 'BUTTON') $('filePdf').click(); };
     $('filePdf').onchange = function (e) { if (e.target.files[0]) importWords(e.target.files[0]); };
@@ -724,7 +780,7 @@
   function boot() {
     Speech.init();
     bind();
-    setupPtt();
+    setupHangman();
     renderWords();
     renderLog();
     showBanner('importErr', '');
