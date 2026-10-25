@@ -238,15 +238,11 @@
   function initBank(word) {
     var letters = word.toUpperCase().split('');
     var pool = letters.slice();
-    /* add 2-3 extra random distractor letters for fun */
-    var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    for (var i = 0; i < 3; i++) {
-      pool.push(alphabet.charAt(Math.floor(Math.random() * alphabet.length)));
-    }
+    /* shuffle them so they aren't in order */
     S.bank = shuffle(pool).map(function (ch, idx) {
       return { id: idx, ch: ch, used: false };
     });
-    S.attempt = [];
+    S.attempt = new Array(targetWord().length).fill(null);
   }
 
   function renderHangman() {
@@ -256,7 +252,7 @@
 
     var currentAttempt = [];
     if (S.mode === 'tiles') {
-      currentAttempt = S.attempt.map(function (x) { return x.ch; });
+      currentAttempt = S.attempt.map(function (x) { return x ? x.ch : null; });
     } else if (S.mode === 'keyboard') {
       currentAttempt = S.keyboardAttempt.split('');
     } else {
@@ -267,9 +263,9 @@
     for (var i = 0; i < targetLen; i++) {
       var ch = currentAttempt[i];
       if (ch) {
-        attemptHtml += '<span class="tile good" data-idx="' + i + '">' + esc(ch) + '</span>';
+        attemptHtml += '<span class="tile good slot-tile" data-slot="' + i + '">' + esc(ch) + '</span>';
       } else {
-        attemptHtml += '<span class="tile rest">&bull;</span>';
+        attemptHtml += '<span class="tile rest slot-tile" data-slot="' + i + '">&bull;</span>';
       }
     }
     attemptBox.innerHTML = attemptHtml;
@@ -282,7 +278,7 @@
     bankBox.innerHTML = bankHtml;
 
     var btn = $('btnCheck');
-    var filled = currentAttempt.length === targetLen;
+    var filled = currentAttempt.filter(Boolean).length === targetLen;
     btn.disabled = !filled;
     btn.classList.toggle('hot', filled);
   }
@@ -692,6 +688,7 @@
     $('tabVoice').onclick = function () { setMode('voice'); };
     $('tabKeyboard').onclick = function () { setMode('keyboard'); };
 
+    /* Tiles mode: click a bank tile to place in the first available blank slot */
     bankBox.addEventListener('click', function (e) {
       if (S.phase !== 'listening' || S.mode !== 'tiles') return;
       var btn = e.target.closest ? e.target.closest('.tile-btn') : null;
@@ -700,27 +697,30 @@
       var item = S.bank.find(function (x) { return x.id === id; });
       if (!item) return;
 
-      if (S.attempt.length < targetWord().length) {
-        item.used = true;
-        S.attempt.push(item);
-        renderHangman();
+      var targetLen = targetWord().length;
+      for (var i = 0; i < targetLen; i++) {
+        if (!S.attempt[i]) {
+          item.used = true;
+          S.attempt[i] = item;
+          renderHangman();
+          break;
+        }
       }
     });
 
+    /* Clicking a placed tile returns it to the bank */
     attemptBox.addEventListener('click', function (e) {
       if (S.phase !== 'listening') return;
       if (S.mode === 'tiles') {
-        var tile = e.target.closest ? e.target.closest('.tile') : null;
-        if (!tile || tile.classList.contains('rest')) return;
-        var idx = parseInt(tile.getAttribute('data-idx'), 10);
-        if (isNaN(idx) || !S.attempt[idx]) return;
+        var tile = e.target.closest ? e.target.closest('.slot-tile') : null;
+        if (!tile) return;
+        var slotIdx = parseInt(tile.getAttribute('data-slot'), 10);
+        if (isNaN(slotIdx) || !S.attempt[slotIdx]) return;
 
-        var removed = S.attempt.splice(idx, 1)[0];
-        if (removed) {
-          var ref = S.bank.find(function (x) { return x.id === removed.id; });
-          if (ref) ref.used = false;
-          renderHangman();
-        }
+        var removed = S.attempt[slotIdx];
+        S.attempt[slotIdx] = null;
+        if (removed) removed.used = false;
+        renderHangman();
       } else if (S.mode === 'keyboard') {
         if (S.keyboardAttempt.length > 0) {
           S.keyboardAttempt = S.keyboardAttempt.slice(0, -1);
@@ -732,7 +732,7 @@
     $('btnClearBank').onclick = function () {
       if (S.phase !== 'listening') return;
       if (S.mode === 'tiles') {
-        S.attempt = [];
+        S.attempt = new Array(targetWord().length).fill(null);
         S.bank.forEach(function (x) { x.used = false; });
       } else {
         S.keyboardAttempt = '';
@@ -755,7 +755,98 @@
       renderHangman();
     });
 
-    /* Drag and drop support */
+    /* Voice Mode (PTT): letter-by-letter spelling */
+    var pttBtn = $('btnPtt');
+    var pttLabel = $('pttLabel');
+    var activeRec = null;
+
+    function beginPtt(e) {
+      if (e && e.cancelable) e.preventDefault();
+      if (S.phase !== 'listening' || S.mode !== 'voice' || S.pttActive) return;
+      S.pttActive = true;
+      S.keyboardAttempt = '';
+      pttBtn.classList.add('recording');
+      pttLabel.textContent = 'Listening letter by letter… release when done';
+      $('hearState').textContent = 'Listening to voice spelling…';
+
+      var STTCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!STTCtor) {
+        toast('Speech recognition unavailable');
+        return;
+      }
+
+      try {
+        var rec = new STTCtor();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        rec.onresult = function (ev) {
+          var acc = '';
+          for (var i = ev.resultIndex; i < ev.results.length; i++) {
+            var r = ev.results[i];
+            if (r[0]) acc += ' ' + r[0].transcript;
+          }
+          var shown = acc.trim();
+          if (shown) {
+            $('hearState').textContent = 'Hearing: ' + shown;
+            var p = L.parseSpeech(shown);
+            var cap = targetWord().length;
+            if (p.letters) {
+              S.keyboardAttempt = p.letters.slice(0, cap);
+              renderHangman();
+            }
+          }
+        };
+
+        activeRec = rec;
+        rec.start();
+        hud('hudMic', 'mic: ptt active', 'on');
+      } catch (err) {
+        toast('Could not start mic');
+      }
+    }
+
+    function endPtt(e) {
+      if (e && e.cancelable) e.preventDefault();
+      if (!S.pttActive) return;
+      S.pttActive = false;
+      pttBtn.classList.remove('recording');
+      pttLabel.textContent = 'Hold & spell letter by letter';
+      hud('hudMic', 'mic: off', '');
+
+      if (activeRec) {
+        try { activeRec.stop(); } catch (err) {}
+        activeRec = null;
+      }
+
+      global.setTimeout(function () {
+        if (S.phase !== 'listening') return;
+        var shown = $('hearState').textContent.replace('Hearing: ', '').trim();
+        var p = L.parseSpeech(shown);
+        var cap = targetWord().length;
+        if (p.letters) {
+          S.keyboardAttempt = p.letters.slice(0, cap);
+          renderHangman();
+        }
+        if (S.keyboardAttempt.length > 0) {
+          check();
+        } else {
+          $('hearState').textContent = 'No letters heard. Try holding and saying letters clearly.';
+        }
+      }, 250);
+    }
+
+    if (pttBtn) {
+      pttBtn.onmousedown = beginPtt;
+      pttBtn.onmouseup = endPtt;
+      pttBtn.onmouseleave = endPtt;
+      pttBtn.ontouchstart = function (e) { beginPtt(e); };
+      pttBtn.ontouchend = function (e) { endPtt(e); };
+      pttBtn.ontouchcancel = function (e) { endPtt(e); };
+    }
+
+    /* Drag and drop support for tiles */
     bankBox.addEventListener('dragstart', function (e) {
       if (S.mode !== 'tiles') return;
       var btn = e.target.closest ? e.target.closest('.tile-btn') : null;
@@ -772,10 +863,14 @@
       var item = S.bank.find(function (x) { return x.id === id; });
       if (!item || item.used) return;
 
-      if (S.attempt.length < targetWord().length) {
-        item.used = true;
-        S.attempt.push(item);
-        renderHangman();
+      var targetLen = targetWord().length;
+      for (var i = 0; i < targetLen; i++) {
+        if (!S.attempt[i]) {
+          item.used = true;
+          S.attempt[i] = item;
+          renderHangman();
+          break;
+        }
       }
     });
 
@@ -792,7 +887,7 @@
     });
     $('drop').addEventListener('drop', function (e) {
       e.preventDefault();
-      $('drop').classList.remove('over');
+      $('drop'].classList.remove('over');
       var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
       if (f) importWords(f);
     });
