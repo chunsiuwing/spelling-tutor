@@ -360,8 +360,10 @@
       S.praiseCount++;
     } else if (res.empty) {
       pushLog('–', 'nothing answered', 'warn', '');
+      coach.speech = 'Please spell the letters of the word out loud.';
     } else {
       pushLog('✗', res.attempt, 'bad', L.describeWrong(res));
+      coach.speech = 'Not correct. Please try again.';
     }
     setFeedback(screen, coach.correct ? 'ok' : 'warn');
     updateControls();
