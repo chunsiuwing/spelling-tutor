@@ -21,6 +21,8 @@
     round: 0,
     attempt: [],
     bank: [],
+    mode: 'tiles', // tiles | voice | keyboard
+    keyboardAttempt: '',
     phase: 'setup',
     results: [],
     log: [],
@@ -230,11 +232,20 @@
     var bankBox = $('bank');
     var targetLen = targetWord().length;
 
+    var currentAttempt = [];
+    if (S.mode === 'tiles') {
+      currentAttempt = S.attempt.map(function (x) { return x.ch; });
+    } else if (S.mode === 'keyboard') {
+      currentAttempt = S.keyboardAttempt.split('');
+    } else {
+      currentAttempt = S.keyboardAttempt.split('');
+    }
+
     var attemptHtml = '';
     for (var i = 0; i < targetLen; i++) {
-      var slot = S.attempt[i];
-      if (slot) {
-        attemptHtml += '<span class="tile good" data-idx="' + i + '">' + esc(slot.ch) + '</span>';
+      var ch = currentAttempt[i];
+      if (ch) {
+        attemptHtml += '<span class="tile good" data-idx="' + i + '">' + esc(ch) + '</span>';
       } else {
         attemptHtml += '<span class="tile rest">&bull;</span>';
       }
@@ -249,7 +260,7 @@
     bankBox.innerHTML = bankHtml;
 
     var btn = $('btnCheck');
-    var filled = S.attempt.length === targetLen;
+    var filled = currentAttempt.length === targetLen;
     btn.disabled = !filled;
     btn.classList.toggle('hot', filled);
   }
@@ -313,10 +324,23 @@
 
   function targetWord() { return S.queue[S.idx] || ''; }
 
+  function setMode(m) {
+    S.mode = m;
+    $('tabTiles').classList.toggle('active', m === 'tiles');
+    $('tabVoice').classList.toggle('active', m === 'voice');
+    $('tabKeyboard').classList.toggle('active', m === 'keyboard');
+
+    $('modeTiles').hidden = (m !== 'tiles');
+    $('modeVoice').hidden = (m !== 'voice');
+    $('modeKeyboard').hidden = (m !== 'keyboard');
+    renderHangman();
+  }
+
   function presentWord() {
     S.round = 0;
     S.lastCoach = null;
     initBank(targetWord());
+    S.keyboardAttempt = '';
 
     updateProgress();
     setFeedback('');
@@ -344,7 +368,12 @@
     setPhase('checking');
 
     var target = targetWord();
-    var attemptStr = S.attempt.map(function (x) { return x.ch; }).join('');
+    var attemptStr = '';
+    if (S.mode === 'tiles') {
+      attemptStr = S.attempt.map(function (x) { return x.ch; }).join('');
+    } else {
+      attemptStr = S.keyboardAttempt;
+    }
 
     var res = L.judge(attemptStr, target);
     var coach = L.coach(res, S.round + 1);
@@ -360,7 +389,7 @@
         (S.round + 1) + (S.round ? ' tries' : ' try'));
       S.praiseCount++;
     } else if (res.empty) {
-      pushLog('–', 'nothing placed', 'warn', '');
+      pushLog('–', 'nothing answered', 'warn', '');
     } else {
       pushLog('✗', res.attempt, 'bad', L.describeWrong(res));
     }
@@ -374,6 +403,7 @@
         if (coach.advance) { S.results.push({ word: target, status: 'reveal' }); nextWord(); return; }
         S.round++;
         initBank(target);
+        S.keyboardAttempt = '';
         setFeedback('');
         setHintPill(null);
         setPhase('listening');
@@ -636,8 +666,12 @@
     var bankBox = $('bank');
     var attemptBox = $('attempt');
 
+    $('tabTiles').onclick = function () { setMode('tiles'); };
+    $('tabVoice').onclick = function () { setMode('voice'); };
+    $('tabKeyboard').onclick = function () { setMode('keyboard'); };
+
     bankBox.addEventListener('click', function (e) {
-      if (S.phase !== 'listening') return;
+      if (S.phase !== 'listening' || S.mode !== 'tiles') return;
       var btn = e.target.closest ? e.target.closest('.tile-btn') : null;
       if (!btn || btn.classList.contains('used')) return;
       var id = parseInt(btn.getAttribute('data-id'), 10);
@@ -653,28 +687,55 @@
 
     attemptBox.addEventListener('click', function (e) {
       if (S.phase !== 'listening') return;
-      var tile = e.target.closest ? e.target.closest('.tile') : null;
-      if (!tile || tile.classList.contains('rest')) return;
-      var idx = parseInt(tile.getAttribute('data-idx'), 10);
-      if (isNaN(idx) || !S.attempt[idx]) return;
+      if (S.mode === 'tiles') {
+        var tile = e.target.closest ? e.target.closest('.tile') : null;
+        if (!tile || tile.classList.contains('rest')) return;
+        var idx = parseInt(tile.getAttribute('data-idx'), 10);
+        if (isNaN(idx) || !S.attempt[idx]) return;
 
-      var removed = S.attempt.splice(idx, 1)[0];
-      if (removed) {
-        var ref = S.bank.find(function (x) { return x.id === removed.id; });
-        if (ref) ref.used = false;
-        renderHangman();
+        var removed = S.attempt.splice(idx, 1)[0];
+        if (removed) {
+          var ref = S.bank.find(function (x) { return x.id === removed.id; });
+          if (ref) ref.used = false;
+          renderHangman();
+        }
+      } else if (S.mode === 'keyboard') {
+        if (S.keyboardAttempt.length > 0) {
+          S.keyboardAttempt = S.keyboardAttempt.slice(0, -1);
+          renderHangman();
+        }
       }
     });
 
     $('btnClearBank').onclick = function () {
       if (S.phase !== 'listening') return;
-      S.attempt = [];
-      S.bank.forEach(function (x) { x.used = false; });
+      if (S.mode === 'tiles') {
+        S.attempt = [];
+        S.bank.forEach(function (x) { x.used = false; });
+      } else {
+        S.keyboardAttempt = '';
+      }
       renderHangman();
     };
 
+    /* Keyboard mode click handler */
+    $('keyboard').addEventListener('click', function (e) {
+      if (S.phase !== 'listening' || S.mode !== 'keyboard') return;
+      var k = e.target.closest ? e.target.closest('.kb-key') : null;
+      if (!k) return;
+      var ltr = k.getAttribute('data-k');
+      var cap = targetWord().length;
+      if (ltr === 'DEL') {
+        S.keyboardAttempt = S.keyboardAttempt.slice(0, -1);
+      } else if (ltr && S.keyboardAttempt.length < cap) {
+        S.keyboardAttempt += ltr;
+      }
+      renderHangman();
+    });
+
     /* Drag and drop support */
     bankBox.addEventListener('dragstart', function (e) {
+      if (S.mode !== 'tiles') return;
       var btn = e.target.closest ? e.target.closest('.tile-btn') : null;
       if (!btn || btn.classList.contains('used')) return;
       e.dataTransfer.setData('text/plain', btn.getAttribute('data-id'));
@@ -683,7 +744,7 @@
     attemptBox.addEventListener('dragover', function (e) { e.preventDefault(); });
     attemptBox.addEventListener('drop', function (e) {
       e.preventDefault();
-      if (S.phase !== 'listening') return;
+      if (S.phase !== 'listening' || S.mode !== 'tiles') return;
       var idStr = e.dataTransfer.getData('text/plain');
       var id = parseInt(idStr, 10);
       var item = S.bank.find(function (x) { return x.id === id; });

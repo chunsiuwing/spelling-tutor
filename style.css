@@ -611,3 +611,31 @@ body.modal-open { overflow: hidden; }
   justify-content: flex-end;
 }
 
+
+/* Mode switcher tabs */
+.mode-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0;
+  background: var(--surface2);
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+.mode-tab {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.mode-tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
