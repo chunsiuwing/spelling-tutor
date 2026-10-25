@@ -13,7 +13,7 @@
   var L = global.Lingo;
 
   var S = {
-    words: [],            // every word imported, in source order
+    words: [],
     selected: Object.create(null),
     filter: '',
     queue: [],
@@ -25,6 +25,8 @@
     results: [],
     log: [],
     rec: null,
+    pttRec: null,
+    pttActive: false,
     token: 0,
     lastCoach: null,
     praiseCount: 0
@@ -313,9 +315,6 @@
           S.attempt = (S.attempt + p.letters).slice(0, cap);
           renderAttempt();
         } else if (!S.attempt && p.words.length) {
-          /* No separate letters heard — the student probably said the
-           * whole word.  Take the longest thing they actually said so
-           * it still gets judged instead of being thrown away.        */
           var long = p.words.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
           if (long.length >= 3) {
             S.attempt = long.toUpperCase().slice(0, cap);
@@ -335,7 +334,7 @@
         if (myToken !== S.token) return;
         showBanner('micWarn', '');
         hud('hudMic', 'mic: listening', 'on');
-        $('hearState').textContent = 'Listening… say each letter with a small pause.';
+        $('hearState').textContent = 'Listening… spell out loud or hold the mic button below.';
       },
       onDenied: function () {
         if (myToken !== S.token) return;
@@ -349,7 +348,7 @@
         if (myToken !== S.token) return;
         hud('hudMic', 'mic: off', '');
       },
-      onError: function () { /* transient — recogniser restarts itself */ }
+      onError: function () { }
     });
     S.rec = rec;
     if (rec) rec.start();
@@ -579,8 +578,88 @@
   }
 
   /* ---------------------------------------------------------------
-   * wiring
+   * push-to-talk mic button
    * ------------------------------------------------------------- */
+  function setupPtt() {
+    var btn = $('btnPtt');
+    var label = $('pttLabel');
+    if (!btn) return;
+
+    var activeRec = null;
+
+    function beginPtt(e) {
+      if (e.cancelable) e.preventDefault();
+      if (S.phase !== 'listening' || S.pttActive) return;
+      S.pttActive = true;
+      btn.classList.add('recording');
+      label.textContent = 'Listening to your spelling… release when done';
+      $('hearState').textContent = 'Listening to speech…';
+
+      if (!Speech.sttOk) {
+        toast('Speech recognition not supported');
+        return;
+      }
+
+      var transcriptAcc = '';
+      activeRec = Speech.recognizer({
+        lang: 'en-US',
+        onStart: function () { hud('hudMic', 'mic: ptt active', 'on'); },
+        onInterim: function (txt) {
+          $('hearState').textContent = 'Hearing: ' + txt;
+          var p = L.parseSpeech(txt);
+          if (p.letters || p.words.length) {
+            var cand = p.letters || (p.words[p.words.length - 1] || '').toUpperCase();
+            if (cand) transcriptAcc = cand;
+          }
+        },
+        onFinal: function (txt) {
+          transcriptAcc += ' ' + txt;
+        },
+        onStop: function () { hud('hudMic', 'mic: off', ''); }
+      });
+      if (activeRec) activeRec.start();
+    }
+
+    function endPtt(e) {
+      if (e && e.cancelable) e.preventDefault();
+      if (!S.pttActive) return;
+      S.pttActive = false;
+      btn.classList.remove('recording');
+      label.textContent = 'Hold to spell out loud';
+
+      if (activeRec) {
+        activeRec.stop();
+        activeRec = null;
+      }
+
+      /* give final speech results a moment to flush, then parse and check */
+      global.setTimeout(function () {
+        if (S.phase !== 'listening') return;
+        var p = L.parseSpeech($('hearState').textContent.replace('Hearing: ', ''));
+        var cap = targetWord().length + 8;
+        if (p.letters) {
+          S.attempt = (S.attempt + p.letters).slice(0, cap);
+        } else if (p.words.length) {
+          var long = p.words.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
+          if (long.length >= 3) S.attempt = long.toUpperCase().slice(0, cap);
+        }
+        renderAttempt();
+        /* Unholding the button triggers check() as requested */
+        if (S.attempt.length > 0) {
+          check();
+        } else {
+          $('hearState').textContent = 'No letters detected. Try holding the mic button and spelling clearly.';
+        }
+      }, 300);
+    }
+
+    btn.addEventListener('pointerdown', beginPtt);
+    btn.addEventListener('pointerup', endPtt);
+    btn.addEventListener('pointerleave', endPtt);
+    btn.addEventListener('touchstart', beginPtt, { passive: false });
+    btn.addEventListener('touchend', endPtt, { passive: false });
+    btn.addEventListener('touchcancel', endPtt, { passive: false });
+  }
   function bind() {
     $('btnPick').onclick = function () { $('filePdf').click(); };
     $('drop').onclick = function (e) { if (e.target.tagName !== 'BUTTON') $('filePdf').click(); };
@@ -666,6 +745,7 @@
   function boot() {
     Speech.init();
     bind();
+    setupPtt();
     renderWords();
     renderLog();
     showBanner('importErr', '');
