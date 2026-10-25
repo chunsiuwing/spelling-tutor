@@ -299,59 +299,9 @@
   }
 
   function startRec(myToken) {
+    /* Continuous auto-listening is disabled when Push-to-Talk is used
+     * so that the background mic listener doesn't interfere with PTT. */
     stopRec();
-    if (!Speech.sttOk) {
-      showBanner('micWarn', 'This browser has no speech recognition. Try Chrome or Edge.');
-      return;
-    }
-    var rec = Speech.recognizer({
-      onFinal: function (txt) {
-        if (myToken !== S.token || S.phase !== 'listening') return;
-        S.raw += ' ' + txt;
-        var p = L.parseSpeech(txt);
-        var cap = targetWord().length + 8;
-
-        if (p.letters) {
-          S.attempt = (S.attempt + p.letters).slice(0, cap);
-          renderAttempt();
-        } else if (!S.attempt && p.words.length) {
-          var long = p.words.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
-          if (long.length >= 3) {
-            S.attempt = long.toUpperCase().slice(0, cap);
-            renderAttempt();
-          }
-        }
-
-        if (p.commands.indexOf('check') >= 0) check();
-        else if (p.commands.indexOf('skip') >= 0) skip();
-      },
-      onInterim: function (txt) {
-        if (myToken !== S.token || S.phase !== 'listening') return;
-        var el = $('hearState');
-        el.textContent = txt.trim() ? 'Hearing: ' + txt.trim() : 'Listening…';
-      },
-      onStart: function () {
-        if (myToken !== S.token) return;
-        showBanner('micWarn', '');
-        hud('hudMic', 'mic: listening', 'on');
-        $('hearState').textContent = 'Listening… spell out loud or hold the mic button below.';
-      },
-      onDenied: function () {
-        if (myToken !== S.token) return;
-        hud('hudMic', 'mic: blocked', 'bad');
-        showBanner('micWarn', 'The microphone is blocked. Tap the padlock in the address bar, allow the microphone, then press "Try microphone again".');
-        $('btnRetryMic').hidden = false;
-        setPhase('blocked');
-        setFeedback('<b>Microphone needed.</b> Allow it, then try again.', 'warn');
-      },
-      onStop: function () {
-        if (myToken !== S.token) return;
-        hud('hudMic', 'mic: off', '');
-      },
-      onError: function () { }
-    });
-    S.rec = rec;
-    if (rec) rec.start();
   }
 
   function targetWord() { return S.queue[S.idx] || ''; }
