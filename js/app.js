@@ -658,19 +658,33 @@
       renderPracticePanel();
     };
 
-    /* Voice Mode PTT */
-    var pttBtn = $('btnPtt');
-    var pttLabel = $('pttLabel');
-    var activeRec = null;
+    /* Voice Mode Auto-Silence Detection */
+    var voiceBtn = $('btnVoiceAuto');
+    var voiceLabel = $('pttLabel');
+    var voiceRec = null;
+    var silenceTimer = null;
+    var voiceLettersAcc = '';
 
-    function beginPtt(e) {
-      if (e && e.cancelable) e.preventDefault();
-      if (S.phase !== 'listening' || S.mode !== 'voice' || S.pttActive) return;
-      S.pttActive = true;
+    function stopVoiceRec() {
+      if (voiceRec) {
+        try { voiceRec.stop(); } catch (e) {}
+        voiceRec = null;
+      }
+      if (silenceTimer) {
+        global.clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
+      if (voiceBtn) voiceBtn.classList.remove('recording');
+      if (voiceLabel) voiceLabel.textContent = 'Tap & spell letter by letter';
+      hud('hudMic', 'mic: off', '');
+    }
+
+    function startVoiceSpelling() {
+      if (S.phase !== 'listening' || S.mode !== 'voice') return;
+      stopVoiceRec();
+      voiceLettersAcc = '';
       S.keyboardAttempt = '';
-      pttBtn.classList.add('recording');
-      pttLabel.textContent = 'Listening letter by letter… release when done';
-      $('hearState').textContent = 'Listening to voice spelling…';
+      renderPracticePanel();
 
       var STTCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!STTCtor) {
@@ -684,6 +698,13 @@
         rec.interimResults = true;
         rec.lang = 'en-US';
 
+        rec.onstart = function () {
+          if (voiceBtn) voiceBtn.classList.add('recording');
+          if (voiceLabel) voiceLabel.textContent = 'Listening… spell letter by letter';
+          hud('hudMic', 'mic: active', 'on');
+          $('hearState').textContent = 'Listening… say each letter (e.g. A, P, P, L, E).';
+        };
+
         rec.onresult = function (ev) {
           var acc = '';
           for (var i = ev.resultIndex; i < ev.results.length; i++) {
@@ -694,59 +715,53 @@
           if (shown) {
             $('hearState').textContent = 'Hearing: ' + shown;
             var p = L.parseSpeech(shown);
-            var cap = targetWord().length;
+            var cap = targetWord().length + 4;
             if (p.letters) {
-              S.keyboardAttempt = p.letters.slice(0, cap);
+              voiceLettersAcc = p.letters.slice(0, cap);
+              S.keyboardAttempt = voiceLettersAcc;
               renderPracticePanel();
             }
           }
+
+          /* Reset 2-second silence timer on any speech activity */
+          if (silenceTimer) global.clearTimeout(silenceTimer);
+          silenceTimer = global.setTimeout(function () {
+            if (S.phase !== 'listening' || S.mode !== 'voice') return;
+            stopVoiceRec();
+            if (S.keyboardAttempt.length > 0) {
+              $('hearState').textContent = '2 seconds silence detected — checking spelling…';
+              check();
+            } else {
+              $('hearState').textContent = 'No letters detected. Tap the mic and try again.';
+            }
+          }, 2000);
         };
 
-        activeRec = rec;
+        rec.onerror = function () {};
+        rec.onend = function () {
+          if (S.pttActive) {
+            try { rec.start(); } catch (e) {}
+          }
+        };
+
+        voiceRec = rec;
+        S.pttActive = true;
         rec.start();
-        hud('hudMic', 'mic: ptt active', 'on');
       } catch (err) {
-        toast('Could not start mic');
+        toast('Could not start voice recognition');
+        stopVoiceRec();
       }
     }
 
-    function endPtt(e) {
-      if (e && e.cancelable) e.preventDefault();
-      if (!S.pttActive) return;
-      S.pttActive = false;
-      pttBtn.classList.remove('recording');
-      pttLabel.textContent = 'Hold & spell letter by letter';
-      hud('hudMic', 'mic: off', '');
-
-      if (activeRec) {
-        try { activeRec.stop(); } catch (err) {}
-        activeRec = null;
-      }
-
-      global.setTimeout(function () {
-        if (S.phase !== 'listening') return;
-        var shown = $('hearState').textContent.replace('Hearing: ', '').trim();
-        var p = L.parseSpeech(shown);
-        var cap = targetWord().length;
-        if (p.letters) {
-          S.keyboardAttempt = p.letters.slice(0, cap);
-          renderPracticePanel();
-        }
-        if (S.keyboardAttempt.length > 0) {
-          check();
+    if (voiceBtn) {
+      voiceBtn.onclick = function () {
+        if (!voiceRec) {
+          startVoiceSpelling();
         } else {
-          $('hearState').textContent = 'No letters heard. Try holding and saying letters clearly.';
+          stopVoiceRec();
+          if (S.keyboardAttempt.length > 0) check();
         }
-      }, 250);
-    }
-
-    if (pttBtn) {
-      pttBtn.onmousedown = beginPtt;
-      pttBtn.onmouseup = endPtt;
-      pttBtn.onmouseleave = endPtt;
-      pttBtn.ontouchstart = function (e) { beginPtt(e); };
-      pttBtn.ontouchend = function (e) { endPtt(e); };
-      pttBtn.ontouchcancel = function (e) { endPtt(e); };
+      };
     }
 
     document.addEventListener('pointerdown', function once() {
