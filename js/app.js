@@ -577,22 +577,21 @@
     presentWord();
   }
 
-  /* ---------------------------------------------------------------
-   * push-to-talk mic button
-   * ------------------------------------------------------------- */
   function setupPtt() {
     var btn = $('btnPtt');
     var label = $('pttLabel');
     if (!btn) return;
 
     var activeRec = null;
+    var transcriptAcc = '';
 
     function beginPtt(e) {
-      if (e.cancelable) e.preventDefault();
+      if (e && e.cancelable) e.preventDefault();
       if (S.phase !== 'listening' || S.pttActive) return;
       S.pttActive = true;
+      transcriptAcc = '';
       btn.classList.add('recording');
-      label.textContent = 'Listening to your spelling… release when done';
+      label.textContent = 'Listening… release when done';
       $('hearState').textContent = 'Listening to speech…';
 
       if (!Speech.sttOk) {
@@ -600,24 +599,53 @@
         return;
       }
 
-      var transcriptAcc = '';
-      activeRec = Speech.recognizer({
-        lang: 'en-US',
-        onStart: function () { hud('hudMic', 'mic: ptt active', 'on'); },
-        onInterim: function (txt) {
-          $('hearState').textContent = 'Hearing: ' + txt;
-          var p = L.parseSpeech(txt);
-          if (p.letters || p.words.length) {
-            var cand = p.letters || (p.words[p.words.length - 1] || '').toUpperCase();
-            if (cand) transcriptAcc = cand;
+      var STTCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!STTCtor) {
+        toast('Speech recognition unavailable');
+        return;
+      }
+
+      try {
+        var rec = new STTCtor();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        rec.onresult = function (ev) {
+          var interim = '';
+          for (var i = ev.resultIndex; i < ev.results.length; i++) {
+            var r = ev.results[i];
+            var txt = r[0] ? r[0].transcript : '';
+            if (r.isFinal) {
+              transcriptAcc += ' ' + txt;
+            } else {
+              interim += txt;
+            }
           }
-        },
-        onFinal: function (txt) {
-          transcriptAcc += ' ' + txt;
-        },
-        onStop: function () { hud('hudMic', 'mic: off', ''); }
-      });
-      if (activeRec) activeRec.start();
+          var shown = (transcriptAcc + ' ' + interim).trim();
+          if (shown) {
+            $('hearState').textContent = 'Hearing: ' + shown;
+            var p = L.parseSpeech(shown);
+            var cap = targetWord().length + 8;
+            if (p.letters) {
+              S.attempt = p.letters.slice(0, cap);
+            } else if (p.words.length) {
+              var long = p.words.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
+              if (long.length >= 3) S.attempt = long.toUpperCase().slice(0, cap);
+            }
+            renderAttempt();
+          }
+        };
+
+        rec.onerror = function () {};
+        rec.onend = function () {};
+
+        activeRec = rec;
+        rec.start();
+        hud('hudMic', 'mic: ptt active', 'on');
+      } catch (err) {
+        toast('Could not start mic');
+      }
     }
 
     function endPtt(e) {
@@ -626,39 +654,40 @@
       S.pttActive = false;
       btn.classList.remove('recording');
       label.textContent = 'Hold to spell out loud';
+      hud('hudMic', 'mic: off', '');
 
       if (activeRec) {
-        activeRec.stop();
+        try { activeRec.stop(); } catch (err) {}
         activeRec = null;
       }
 
-      /* give final speech results a moment to flush, then parse and check */
       global.setTimeout(function () {
         if (S.phase !== 'listening') return;
-        var p = L.parseSpeech($('hearState').textContent.replace('Hearing: ', ''));
+        var shown = $('hearState').textContent.replace('Hearing: ', '').trim();
+        var p = L.parseSpeech(shown);
         var cap = targetWord().length + 8;
         if (p.letters) {
-          S.attempt = (S.attempt + p.letters).slice(0, cap);
+          S.attempt = p.letters.slice(0, cap);
         } else if (p.words.length) {
           var long = p.words.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
           if (long.length >= 3) S.attempt = long.toUpperCase().slice(0, cap);
         }
         renderAttempt();
-        /* Unholding the button triggers check() as requested */
+
         if (S.attempt.length > 0) {
           check();
         } else {
           $('hearState').textContent = 'No letters detected. Try holding the mic button and spelling clearly.';
         }
-      }, 300);
+      }, 250);
     }
 
-    btn.addEventListener('pointerdown', beginPtt);
-    btn.addEventListener('pointerup', endPtt);
-    btn.addEventListener('pointerleave', endPtt);
-    btn.addEventListener('touchstart', beginPtt, { passive: false });
-    btn.addEventListener('touchend', endPtt, { passive: false });
-    btn.addEventListener('touchcancel', endPtt, { passive: false });
+    btn.onmousedown = beginPtt;
+    btn.onmouseup = endPtt;
+    btn.onmouseleave = endPtt;
+    btn.ontouchstart = function (e) { beginPtt(e); };
+    btn.ontouchend = function (e) { endPtt(e); };
+    btn.ontouchcancel = function (e) { endPtt(e); };
   }
   function bind() {
     $('btnPick').onclick = function () { $('filePdf').click(); };
