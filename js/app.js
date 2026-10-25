@@ -202,6 +202,7 @@
         pasteWords();
       }
     };
+  }
   function setPhase(p) {
     S.phase = p;
     document.body.setAttribute('data-phase', p);
@@ -1011,6 +1012,7 @@
         pasteWords();
       }
     };
+  }
 
     $('filter').oninput = function () { S.filter = this.value; renderWords(); };
 
