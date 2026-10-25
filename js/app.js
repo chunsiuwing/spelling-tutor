@@ -13,14 +13,16 @@
   var L = global.Lingo;
 
   var S = {
-    words: [],            // every word imported, in source order
+    words: [],
     selected: Object.create(null),
     filter: '',
     queue: [],
     idx: 0,
     round: 0,
-    attempt: '',
-    raw: '',
+    attempt: [],
+    bank: [],
+    mode: 'tiles', // tiles | voice | keyboard
+    keyboardAttempt: '',
     phase: 'setup',
     results: [],
     log: [],
