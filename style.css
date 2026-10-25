@@ -486,3 +486,39 @@ body.modal-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+/* On-screen spelling keyboard */
+.keyboard {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 14px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--surface2);
+  border: 1px solid var(--line);
+}
+.kb-row {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.kb-key {
+  flex: 1;
+  max-width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, transform 0.08s ease;
+}
+.kb-key:hover { background: #263457; border-color: var(--accent-hi); }
+.kb-key:active { transform: scale(0.93); }
+

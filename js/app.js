@@ -623,6 +623,19 @@
     $('btnHint').onclick = function () {
       if (S.lastCoach) Speech.speak(S.lastCoach.speech, { rate: 0.8 });
     };
+
+    $('keyboard').addEventListener('click', function (e) {
+      var k = e.target.closest ? e.target.closest('.kb-key') : null;
+      if (!k || S.phase !== 'listening') return;
+      var ltr = k.getAttribute('data-k');
+      var cap = targetWord().length + 8;
+      if (ltr === 'DEL') {
+        S.attempt = S.attempt.slice(0, -1);
+      } else if (ltr) {
+        S.attempt = (S.attempt + ltr).slice(0, cap);
+      }
+      renderAttempt();
+    });
     $('btnSkip').onclick = function () { Speech.prime(); skip(); };
     $('btnQuit').onclick = function () { Speech.prime(); endSession(); };
     $('btnClose').onclick = endSession;
