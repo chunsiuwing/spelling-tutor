@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0f1c">
+<meta name="description" content="SpellCoach — load a word list from a PDF, hear a word read aloud once, and spell it out loud. The word is never shown on screen while you answer.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SpellCoach">
+<title>SpellCoach — spell it out loud</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body data-phase="setup">
+
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">Aa</span>
+      <span class="name">SpellCoach</span>
+      <span class="tag">hear it · say it · spell it</span>
+    </div>
+    <div class="hud">
+      <span class="pill" id="hudCam">camera: off</span>
+      <span class="pill" id="hudMic">mic: off</span>
+    </div>
+  </header>
+
+  <div class="banners">
+    <div class="banner" id="camWarn" hidden></div>
+    <div class="banner" id="micWarn" hidden></div>
+    <div class="banner info" id="modelBanner" hidden></div>
+    <div class="banner err" id="importErr" hidden></div>
+  </div>
+
+  <!-- ============================ SETUP ============================ -->
+  <main id="setup">
+
+    <section class="card hero">
+      <h1>Test your spelling, out loud.</h1>
+      <p class="lede">
+        Load a word list from a <b>PDF</b> — or paste one — then choose the words you want
+        to revise. Each word is <b>read aloud once</b> and then you spell it, letter by
+        letter, in front of the camera. <b>The word is never written on screen</b> while
+        you are answering.
+      </p>
+
+      <div class="import-grid">
+        <div class="drop" id="drop" role="button" tabindex="0"
+             aria-label="Upload a PDF word list">
+          <input type="file" id="filePdf" accept="application/pdf,.pdf" hidden>
+          <div class="drop-ico" aria-hidden="true">📄</div>
+          <div class="drop-txt">
+            <b>Upload a PDF</b>
+            <span>drop it here, or click to choose</span>
+          </div>
+          <button class="btn ghost" id="btnPick" type="button">Choose file</button>
+        </div>
+
+        <div class="paste">
+          <label for="pasteBox">…or paste a word list</label>
+          <textarea id="pasteBox" rows="4"
+            placeholder="butterfly, elephant, umbrella&#10;or one word per line"></textarea>
+          <button class="btn ghost" id="btnPaste" type="button">Add these words</button>
+        </div>
+      </div>
+
+      <p class="status" id="importStatus" hidden></p>
+      <div class="progress" id="importProg" hidden><i></i></div>
+    </section>
+
+    <section class="card" id="pickerCard">
+      <div class="toolbar" id="toolbar" hidden>
+        <input type="search" id="filter" placeholder="Filter words…" aria-label="Filter words">
+        <span class="count" id="selCount">0 selected</span>
+        <div class="spacer"></div>
+        <button class="btn tiny" id="btnAll" type="button">Select all</button>
+        <button class="btn tiny" id="btnNone" type="button">Clear</button>
+      </div>
+      <div class="chips" id="wordList">
+        <p class="empty">No words yet. Upload a PDF or paste a list above.</p>
+      </div>
+    </section>
+
+    <div class="startbar">
+      <button class="btn primary big" id="btnStart" type="button" disabled>Start practice</button>
+      <p class="tiny">
+        One word is read out, then you spell it. Nothing is written down for you.
+      </p>
+    </div>
+  </main>
+
+  <!-- =========================== PRACTICE ========================== -->
+  <main id="practice" hidden>
+
+    <div class="stage">
+      <div class="cam card">
+        <video id="video" playsinline autoplay muted></video>
+        <canvas id="overlay" aria-hidden="true"></canvas>
+        <div class="cam-hint">Front camera · the app keeps an eye on you while you spell</div>
+      </div>
+
+      <div class="panel card">
+        <div class="progress slim" id="progBar"><i></i></div>
+
+        <div class="prow">
+          <span class="wp" id="wordPos">Word 1 of 1</span>
+          <span class="pill hint" id="hintPill" hidden></span>
+        </div>
+
+        <div class="stageState" id="stageState">Listen carefully…</div>
+
+        <div class="attempt" id="attempt" aria-live="polite"></div>
+
+        <p class="hear" id="hearState">Listen carefully — the word is read once.</p>
+
+        <div class="feedback" id="feedback" hidden aria-live="polite"></div>
+
+        <div class="controls">
+          <button class="btn primary hot" id="btnCheck" type="button" disabled>
+            I&rsquo;m finished — check
+          </button>
+          <button class="btn ghost" id="btnHint" type="button" disabled>Hear the hint again</button>
+          <button class="btn ghost" id="btnRetryMic" type="button" hidden>Try microphone again</button>
+          <div class="spacer"></div>
+          <button class="btn ghost" id="btnSkip" type="button">Skip</button>
+          <button class="btn ghost danger" id="btnQuit" type="button">End session</button>
+        </div>
+      </div>
+    </div>
+
+    <section class="card logcard">
+      <h2>This session</h2>
+      <ol class="log" id="log"></ol>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p class="tiny">
+      Spelling and syllables are judged on your device. Words never leave the page.
+      The microphone is only used while you are spelling.
+    </p>
+  </footer>
+</div>
+
+<!-- ============================ SUMMARY =========================== -->
+<div class="modal" id="summary" hidden role="dialog" aria-modal="true" aria-labelledby="sumText">
+  <div class="sheet card">
+    <div class="tick" aria-hidden="true">✓</div>
+    <p class="sumtext" id="sumText"></p>
+    <div id="sumList"></div>
+    <div class="controls center">
+      <button class="btn primary" id="btnAgain" type="button" hidden>Practise those again</button>
+      <button class="btn ghost" id="btnClose" type="button">Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="./vendor/pdf/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<script src="./js/lingo.js"></script>
+<script src="./js/words.js"></script>
+<script src="./js/speech.js"></script>
+<script src="./js/camera.js"></script>
+<script src="./js/app.js"></script>
+</body>
+</html>
