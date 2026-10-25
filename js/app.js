@@ -650,6 +650,166 @@
       Camera.close();
       stopRec();
     });
+
+    /* Mode tabs wiring */
+    $('tabTiles').onclick = function () { setMode('tiles'); };
+    $('tabVoice').onclick = function () { setMode('voice'); };
+    $('tabKeyboard').onclick = function () { setMode('keyboard'); };
+
+    /* Tile bank & slot clicks */
+    var bankBox = $('bank');
+    var attemptBox = $('attempt');
+
+    bankBox.onclick = function (e) {
+      if (S.phase !== 'listening' || S.mode !== 'tiles') return;
+      var btn = e.target.closest ? e.target.closest('.tile-btn') : null;
+      if (!btn || btn.classList.contains('used')) return;
+      var id = parseInt(btn.getAttribute('data-id'), 10);
+      var item = S.bank.find(function (x) { return x.id === id; });
+      if (!item) return;
+
+      var targetLen = targetWord().length;
+      for (var i = 0; i < targetLen; i++) {
+        if (!S.attempt[i]) {
+          item.used = true;
+          S.attempt[i] = item;
+          renderPracticePanel();
+          break;
+        }
+      }
+    };
+
+    attemptBox.onclick = function (e) {
+      if (S.phase !== 'listening') return;
+      if (S.mode === 'tiles') {
+        var tile = e.target.closest ? e.target.closest('.slot-tile') : null;
+        if (!tile) return;
+        var slotIdx = parseInt(tile.getAttribute('data-slot'), 10);
+        if (isNaN(slotIdx) || !S.attempt[slotIdx]) return;
+
+        var removed = S.attempt[slotIdx];
+        S.attempt[slotIdx] = null;
+        if (removed) removed.used = false;
+        renderPracticePanel();
+      }
+    };
+
+    $('btnClearBank').onclick = function () {
+      if (S.phase !== 'listening') return;
+      if (S.mode === 'tiles') {
+        S.attempt = new Array(targetWord().length).fill(null);
+        S.bank.forEach(function (x) { x.used = false; });
+      } else {
+        S.keyboardAttempt = '';
+      }
+      renderPracticePanel();
+    };
+
+    /* Keyboard mode click handler */
+    $('keyboard').onclick = function (e) {
+      if (S.phase !== 'listening' || S.mode !== 'keyboard') return;
+      var k = e.target.closest ? e.target.closest('.kb-key') : null;
+      if (!k) return;
+      var ltr = k.getAttribute('data-k');
+      var cap = targetWord().length;
+      if (ltr === 'DEL') {
+        S.keyboardAttempt = S.keyboardAttempt.slice(0, -1);
+      } else if (ltr && S.keyboardAttempt.length < cap) {
+        S.keyboardAttempt += ltr;
+      }
+      renderPracticePanel();
+    };
+
+    /* Voice Mode PTT */
+    var pttBtn = $('btnPtt');
+    var pttLabel = $('pttLabel');
+    var activeRec = null;
+
+    function beginPtt(e) {
+      if (e && e.cancelable) e.preventDefault();
+      if (S.phase !== 'listening' || S.mode !== 'voice' || S.pttActive) return;
+      S.pttActive = true;
+      S.keyboardAttempt = '';
+      pttBtn.classList.add('recording');
+      pttLabel.textContent = 'Listening letter by letter… release when done';
+      $('hearState').textContent = 'Listening to voice spelling…';
+
+      var STTCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!STTCtor) {
+        toast('Speech recognition unavailable');
+        return;
+      }
+
+      try {
+        var rec = new STTCtor();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        rec.onresult = function (ev) {
+          var acc = '';
+          for (var i = ev.resultIndex; i < ev.results.length; i++) {
+            var r = ev.results[i];
+            if (r[0]) acc += ' ' + r[0].transcript;
+          }
+          var shown = acc.trim();
+          if (shown) {
+            $('hearState').textContent = 'Hearing: ' + shown;
+            var p = L.parseSpeech(shown);
+            var cap = targetWord().length;
+            if (p.letters) {
+              S.keyboardAttempt = p.letters.slice(0, cap);
+              renderPracticePanel();
+            }
+          }
+        };
+
+        activeRec = rec;
+        rec.start();
+        hud('hudMic', 'mic: ptt active', 'on');
+      } catch (err) {
+        toast('Could not start mic');
+      }
+    }
+
+    function endPtt(e) {
+      if (e && e.cancelable) e.preventDefault();
+      if (!S.pttActive) return;
+      S.pttActive = false;
+      pttBtn.classList.remove('recording');
+      pttLabel.textContent = 'Hold & spell letter by letter';
+      hud('hudMic', 'mic: off', '');
+
+      if (activeRec) {
+        try { activeRec.stop(); } catch (err) {}
+        activeRec = null;
+      }
+
+      global.setTimeout(function () {
+        if (S.phase !== 'listening') return;
+        var shown = $('hearState').textContent.replace('Hearing: ', '').trim();
+        var p = L.parseSpeech(shown);
+        var cap = targetWord().length;
+        if (p.letters) {
+          S.keyboardAttempt = p.letters.slice(0, cap);
+          renderPracticePanel();
+        }
+        if (S.keyboardAttempt.length > 0) {
+          check();
+        } else {
+          $('hearState').textContent = 'No letters heard. Try holding and saying letters clearly.';
+        }
+      }, 250);
+    }
+
+    if (pttBtn) {
+      pttBtn.onmousedown = beginPtt;
+      pttBtn.onmouseup = endPtt;
+      pttBtn.onmouseleave = endPtt;
+      pttBtn.ontouchstart = function (e) { beginPtt(e); };
+      pttBtn.ontouchend = function (e) { endPtt(e); };
+      pttBtn.ontouchcancel = function (e) { endPtt(e); };
+    }
   }
 
   function boot() {
