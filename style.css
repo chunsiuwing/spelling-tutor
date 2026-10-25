@@ -486,8 +486,3 @@ body.modal-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
-
-/* Spelling mode containers */
-.spelling-mode[hidden] { display: none !important; }
-.spelling-mode { display: block; }
-

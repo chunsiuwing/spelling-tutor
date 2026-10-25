@@ -1,5 +1,10 @@
 /* =====================================================================
- * app.js — SpellCoach state machine and UI wiring.
+ * app.js — state machine and UI wiring.
+ *
+ * Setup  : import a PDF (or paste words) -> tick the words to revise
+ * Run    : hear the word ONCE -> spell it out loud -> get an answer
+ * Never  : the target word is not written on screen until it has been
+ *          answered (or finally revealed as a hint).
  * ===================================================================== */
 (function (global) {
   'use strict';
@@ -8,26 +13,26 @@
   var L = global.Lingo;
 
   var S = {
-    words: [],
+    words: [],            // every word imported, in source order
     selected: Object.create(null),
     filter: '',
     queue: [],
     idx: 0,
     round: 0,
-    attempt: [],
-    bank: [],
-    mode: 'tiles', // tiles | voice | keyboard
-    keyboardAttempt: '',
+    attempt: '',
+    raw: '',
     phase: 'setup',
     results: [],
     log: [],
+    rec: null,
     token: 0,
     lastCoach: null,
-    praiseCount: 0,
-    pttRec: null,
-    pttActive: false
+    praiseCount: 0
   };
 
+  /* ---------------------------------------------------------------
+   * tiny helpers
+   * ------------------------------------------------------------- */
   function delay(ms) { return new Promise(function (r) { global.setTimeout(r, ms); }); }
   function key(w) { return String(w).toLowerCase(); }
   function selectedCount() { return Object.keys(S.selected).length; }
@@ -58,7 +63,7 @@
   }
 
   /* ---------------------------------------------------------------
-   * word list setup
+   * word list (setup screen)
    * ------------------------------------------------------------- */
   function renderWords() {
     var box = $('wordList');
@@ -110,6 +115,9 @@
     return added;
   }
 
+  /* ---------------------------------------------------------------
+   * import
+   * ------------------------------------------------------------- */
   function importStatus(msg, pct) {
     var el = $('importStatus');
     if (!msg) { el.hidden = true; return; }
@@ -169,14 +177,14 @@
   }
 
   /* ---------------------------------------------------------------
-   * practice state & rendering
+   * practice screen
    * ------------------------------------------------------------- */
   function setPhase(p) {
     S.phase = p;
     document.body.setAttribute('data-phase', p);
     var st = $('stageState');
     if (p === 'presenting') st.textContent = 'Listen carefully…';
-    else if (p === 'listening') st.textContent = 'Spell the word below.';
+    else if (p === 'listening') st.textContent = 'Now spell it out loud.';
     else if (p === 'checking') st.textContent = 'Checking…';
     else if (p === 'feedback') st.textContent = 'Here is my answer.';
     updateControls();
@@ -187,76 +195,54 @@
     var check = $('btnCheck');
     check.disabled = !listening;
     check.classList.toggle('hot', listening);
-    check.innerHTML = 'I&rsquo;m finished — check';
+    check.innerHTML = listening
+      ? '<span class="pulse"></span>I\'m finished — check'
+      : 'I\'m finished — check';
     $('btnSkip').disabled = (S.phase === 'checking');
     $('btnQuit').disabled = (S.phase === 'checking');
     $('btnHint').disabled = !S.lastCoach || !S.lastCoach.speakHint;
   }
 
-  function shuffle(arr) {
-    var a = arr.slice();
-    for (var i = a.length - 1; i > 0; i--) {
-      var j = Math.floor(Math.random() * (i + 1));
-      var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
-    }
-    return a;
-  }
+  /* Letters are only ever dots until the student has committed. */
+  function renderAttempt(res, coach) {
+    var el = $('attempt');
+    var html = '';
+    var i;
 
-  function initBank(word) {
-    var letters = word.toUpperCase().split('');
-    S.bank = shuffle(letters).map(function (ch, idx) {
-      return { id: idx, ch: ch, used: false };
-    });
-    S.attempt = new Array(targetWord().length).fill(null);
-    S.keyboardAttempt = '';
-  }
-
-  function renderPracticePanel() {
-    var attemptBox = $('attempt');
-    var bankBox = $('bank');
-    var targetLen = targetWord().length;
-
-    var currentAttempt = [];
-    if (S.mode === 'tiles') {
-      currentAttempt = S.attempt.map(function (x) { return x ? x.ch : null; });
-    } else {
-      currentAttempt = S.keyboardAttempt.split('');
-    }
-
-    var attemptHtml = '';
-    for (var i = 0; i < targetLen; i++) {
-      var ch = currentAttempt[i];
-      if (ch) {
-        attemptHtml += '<span class="tile good slot-tile" data-slot="' + i + '">' + esc(ch) + '</span>';
+    if (S.phase === 'presenting' || S.phase === 'listening') {
+      if (!S.attempt.length) {
+        html = '<span class="tile rest">?</span><span class="tile rest">?</span><span class="tile rest">?</span>';
       } else {
-        attemptHtml += '<span class="tile rest slot-tile" data-slot="' + i + '">&bull;</span>';
+        for (i = 0; i < S.attempt.length; i++) html += '<span class="tile" data-live="1">&bull;</span>';
       }
+      el.innerHTML = html;
+      el.className = 'attempt';
+      return;
     }
-    attemptBox.innerHTML = attemptHtml;
 
-    var bankHtml = '';
-    for (var j = 0; j < S.bank.length; j++) {
-      var b = S.bank[j];
-      bankHtml += '<button class="tile-btn' + (b.used ? ' used' : '') + '" type="button" draggable="true" data-id="' + b.id + '">' + esc(b.ch) + '</button>';
+    /* answered — show what the microphone caught, or the target once
+     * it has been given away as the final hint                    */
+    var revealed = !!(coach && coach.reveal);
+    var word = revealed ? ((res && res.target) || '') : (S.attempt || '');
+
+    if (!word) {
+      el.innerHTML = '<span class="tile rest">?</span>';
+      el.className = 'attempt';
+      return;
     }
-    bankBox.innerHTML = bankHtml;
 
-    var btn = $('btnCheck');
-    var filled = currentAttempt.filter(Boolean).length === targetLen;
-    btn.disabled = !filled;
-    btn.classList.toggle('hot', filled);
-  }
+    var p = (res && res.prefix) || 0;
+    var s = (res && res.suffix) || 0;
 
-  function setMode(m) {
-    S.mode = m;
-    $('tabTiles').classList.toggle('active', m === 'tiles');
-    $('tabVoice').classList.toggle('active', m === 'voice');
-    $('tabKeyboard').classList.toggle('active', m === 'keyboard');
-
-    $('modeTiles').hidden = (m !== 'tiles');
-    $('modeVoice').hidden = (m !== 'voice');
-    $('modeKeyboard').hidden = (m !== 'keyboard');
-    renderPracticePanel();
+    for (i = 0; i < word.length; i++) {
+      var cls = 'tile';
+      if (revealed) cls += (res && res.correct) ? ' good' : ' target';
+      else if (res && !res.correct) cls += (i < p || (word.length - i) <= s) ? ' good' : ' bad';
+      else cls += ' good';
+      html += '<span class="' + cls + '">' + esc(word.charAt(i)) + '</span>';
+    }
+    el.innerHTML = html;
+    el.className = 'attempt ' + ((coach && coach.correct) ? 'ok' : 'no');
   }
 
   function setFeedback(html, tone) {
@@ -302,15 +288,82 @@
     $('progBar').firstElementChild.style.width = ((S.idx) / total) * 100 + '%';
   }
 
+  /* ---------------------------------------------------------------
+   * the loop
+   * ------------------------------------------------------------- */
+  function stopRec() {
+    if (S.rec) { try { S.rec.stop(); } catch (e) {} S.rec = null; }
+    hud('hudMic', 'mic: off', '');
+  }
+
+  function startRec(myToken) {
+    stopRec();
+    if (!Speech.sttOk) {
+      showBanner('micWarn', 'This browser has no speech recognition. Try Chrome or Edge.');
+      return;
+    }
+    var rec = Speech.recognizer({
+      onFinal: function (txt) {
+        if (myToken !== S.token || S.phase !== 'listening') return;
+        S.raw += ' ' + txt;
+        var p = L.parseSpeech(txt);
+        var cap = targetWord().length + 8;
+
+        if (p.letters) {
+          S.attempt = (S.attempt + p.letters).slice(0, cap);
+          renderAttempt();
+        } else if (!S.attempt && p.words.length) {
+          /* No separate letters heard — the student probably said the
+           * whole word.  Take the longest thing they actually said so
+           * it still gets judged instead of being thrown away.        */
+          var long = p.words.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
+          if (long.length >= 3) {
+            S.attempt = long.toUpperCase().slice(0, cap);
+            renderAttempt();
+          }
+        }
+
+        if (p.commands.indexOf('check') >= 0) check();
+        else if (p.commands.indexOf('skip') >= 0) skip();
+      },
+      onInterim: function (txt) {
+        if (myToken !== S.token || S.phase !== 'listening') return;
+        var el = $('hearState');
+        el.textContent = txt.trim() ? 'Hearing: ' + txt.trim() : 'Listening…';
+      },
+      onStart: function () {
+        if (myToken !== S.token) return;
+        showBanner('micWarn', '');
+        hud('hudMic', 'mic: listening', 'on');
+        $('hearState').textContent = 'Listening… say each letter with a small pause.';
+      },
+      onDenied: function () {
+        if (myToken !== S.token) return;
+        hud('hudMic', 'mic: blocked', 'bad');
+        showBanner('micWarn', 'The microphone is blocked. Tap the padlock in the address bar, allow the microphone, then press "Try microphone again".');
+        $('btnRetryMic').hidden = false;
+        setPhase('blocked');
+        setFeedback('<b>Microphone needed.</b> Allow it, then try again.', 'warn');
+      },
+      onStop: function () {
+        if (myToken !== S.token) return;
+        hud('hudMic', 'mic: off', '');
+      },
+      onError: function () { /* transient — recogniser restarts itself */ }
+    });
+    S.rec = rec;
+    if (rec) rec.start();
+  }
+
   function targetWord() { return S.queue[S.idx] || ''; }
 
-  /* ---------------------------------------------------------------
-   * practice flow
-   * ------------------------------------------------------------- */
   function presentWord() {
     S.round = 0;
+    S.attempt = '';
+    S.raw = '';
     S.lastCoach = null;
-    initBank(targetWord());
+    var my = ++S.token;
+    stopRec();
 
     updateProgress();
     setFeedback('');
@@ -318,39 +371,42 @@
     $('hintPill').hidden = true;
     $('hearState').textContent = 'Listen carefully — the word is read once.';
     setPhase('presenting');
-    renderPracticePanel();
+    renderAttempt();
 
     if (!Speech.ttsOk) {
-      showBanner('micWarn', 'Speech output is not available in this browser.');
+      showBanner('micWarn', 'This browser cannot speak. You will see the status but hear no voice.');
     }
 
     var word = targetWord();
     Speech.speak(word, { rate: 0.82 })
       .then(function () { return delay(700); })
       .then(function () {
+        if (my !== S.token) return;                 // skipped or quit meanwhile
         setPhase('listening');
-        renderPracticePanel();
+        renderAttempt();
+        startRec(my);
       });
   }
 
   function check() {
     if (S.phase !== 'listening') return;
+    var my = S.token;
     setPhase('checking');
+    stopRec();
 
     var target = targetWord();
-    var attemptStr = '';
-    if (S.mode === 'tiles') {
-      attemptStr = S.attempt.map(function (x) { return x ? x.ch : ''; }).join('');
-    } else {
-      attemptStr = S.keyboardAttempt;
+    if (!S.attempt) {                              /* said the whole word? */
+      var raw = (S.raw || '').replace(/[^a-zA-Z]/g, '').toUpperCase();
+      if (raw === target.toUpperCase()) S.attempt = raw;
     }
 
-    var res = L.judge(attemptStr, target);
+    var res = L.judge(S.attempt, target);
     var coach = L.coach(res, S.round + 1);
     S.lastCoach = coach;
 
     setPhase('feedback');
     setHintPill(res, S.round + 1);
+    renderAttempt(res, coach);
 
     var screen = coach.screen;
     if (coach.correct) {
@@ -359,7 +415,7 @@
         (S.round + 1) + (S.round ? ' tries' : ' try'));
       S.praiseCount++;
     } else if (res.empty) {
-      pushLog('–', 'nothing answered', 'warn', '');
+      pushLog('–', 'nothing heard', 'warn', '');
     } else {
       pushLog('✗', res.attempt, 'bad', L.describeWrong(res));
     }
@@ -369,14 +425,17 @@
     Speech.speak(coach.speech, { rate: coach.correct ? 0.95 : 0.8 })
       .then(function () { return delay(450); })
       .then(function () {
+        if (my !== S.token) return;
         if (coach.correct) { S.results.push({ word: target, status: 'ok' }); nextWord(); return; }
         if (coach.advance) { S.results.push({ word: target, status: 'reveal' }); nextWord(); return; }
         S.round++;
-        initBank(target);
+        S.attempt = '';
+        S.raw = '';
         setFeedback('');
         setHintPill(null);
         setPhase('listening');
-        renderPracticePanel();
+        renderAttempt();
+        startRec(my);
       });
   }
 
@@ -388,22 +447,18 @@
   }
 
   function nextWord() {
+    stopRec();
     S.idx++;
     if (S.idx >= S.queue.length) { finish(); return; }
     presentWord();
   }
 
   function finish() {
+    stopRec();
     S.token++;
-    Speech.stop();
-    Camera.close();
-    hud('hudCam', 'camera: off', '');
-    hud('hudMic', 'mic: off', '');
-    $('summary').hidden = false;
-    document.body.classList.add('modal-open');
-    $('practice').hidden = true;
-    $('setup').hidden = false;
-    document.body.setAttribute('data-phase', 'setup');
+    setPhase('done');
+    updateProgress();
+    $('progBar').firstElementChild.style.width = '100%';
 
     var ok = S.results.filter(function (r) { return r.status === 'ok'; }).length;
     var rev = S.results.filter(function (r) { return r.status === 'reveal'; }).length;
@@ -432,6 +487,8 @@
     $('sumList').innerHTML = html;
     $('btnAgain').hidden = !needs.length;
 
+    $('summary').hidden = false;
+    document.body.classList.add('modal-open');
     Speech.speak(line + tail, { rate: 0.9 });
     pushLog('■', 'session finished', 'mute', ok + '/' + total);
   }
@@ -495,6 +552,7 @@
 
   function endSession() {
     S.token++;
+    stopRec();
     Speech.stop();
     Camera.close();
     hud('hudCam', 'camera: off', '');
@@ -521,15 +579,9 @@
   }
 
   /* ---------------------------------------------------------------
-   * Event wiring
+   * wiring
    * ------------------------------------------------------------- */
-  function boot() {
-    Speech.init();
-    renderWords();
-    renderLog();
-    showBanner('importErr', '');
-
-    /* Setup screen controls */
+  function bind() {
     $('btnPick').onclick = function () { $('filePdf').click(); };
     $('drop').onclick = function (e) { if (e.target.tagName !== 'BUTTON') $('filePdf').click(); };
     $('filePdf').onchange = function (e) { if (e.target.files[0]) importWords(e.target.files[0]); };
@@ -541,19 +593,11 @@
       $('drop').addEventListener(ev, function (e) { e.preventDefault(); this.classList.remove('over'); });
     });
     $('drop').addEventListener('drop', function (e) {
-      e.preventDefault();
-      $('drop').classList.remove('over');
       var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
       if (f) importWords(f);
     });
 
     $('btnPaste').onclick = pasteWords;
-    $('pasteBox').onkeydown = function (e) {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        pasteWords();
-      }
-    };
 
     $('filter').oninput = function () { S.filter = this.value; renderWords(); };
 
@@ -566,184 +610,29 @@
     };
     $('btnNone').onclick = function () { S.selected = Object.create(null); renderWords(); };
 
-    $('wordList').onclick = function (e) {
+    $('wordList').addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('.chip') : null;
       if (!b) return;
       var k = key(b.getAttribute('data-w'));
       if (S.selected[k]) delete S.selected[k]; else S.selected[k] = 1;
       renderWords();
-    };
+    });
 
     $('btnStart').onclick = function () { Speech.prime(); startPractice(); };
     $('btnCheck').onclick = function () { Speech.prime(); check(); };
     $('btnHint').onclick = function () {
       if (S.lastCoach) Speech.speak(S.lastCoach.speech, { rate: 0.8 });
     };
-
     $('btnSkip').onclick = function () { Speech.prime(); skip(); };
     $('btnQuit').onclick = function () { Speech.prime(); endSession(); };
     $('btnClose').onclick = endSession;
     $('btnAgain').onclick = function () { Speech.prime(); again(); };
-
-    /* Mode tabs wiring */
-    $('tabTiles').onclick = function () { setMode('tiles'); };
-    $('tabVoice').onclick = function () { setMode('voice'); };
-    $('tabKeyboard').onclick = function () { setMode('keyboard'); };
-
-    /* Tile bank & slot clicks */
-    var bankBox = $('bank');
-    var attemptBox = $('attempt');
-
-    bankBox.onclick = function (e) {
-      if (S.phase !== 'listening' || S.mode !== 'tiles') return;
-      var btn = e.target.closest ? e.target.closest('.tile-btn') : null;
-      if (!btn || btn.classList.contains('used')) return;
-      var id = parseInt(btn.getAttribute('data-id'), 10);
-      var item = S.bank.find(function (x) { return x.id === id; });
-      if (!item) return;
-
-      var targetLen = targetWord().length;
-      for (var i = 0; i < targetLen; i++) {
-        if (!S.attempt[i]) {
-          item.used = true;
-          S.attempt[i] = item;
-          renderPracticePanel();
-          break;
-        }
-      }
+    $('btnRetryMic').onclick = function () {
+      showBanner('micWarn', '');
+      $('btnRetryMic').hidden = true;
+      setPhase('listening');
+      startRec(S.token);
     };
-
-    attemptBox.onclick = function (e) {
-      if (S.phase !== 'listening') return;
-      if (S.mode === 'tiles') {
-        var tile = e.target.closest ? e.target.closest('.slot-tile') : null;
-        if (!tile) return;
-        var slotIdx = parseInt(tile.getAttribute('data-slot'), 10);
-        if (isNaN(slotIdx) || !S.attempt[slotIdx]) return;
-
-        var removed = S.attempt[slotIdx];
-        S.attempt[slotIdx] = null;
-        if (removed) removed.used = false;
-        renderPracticePanel();
-      }
-    };
-
-    $('btnClearBank').onclick = function () {
-      if (S.phase !== 'listening') return;
-      if (S.mode === 'tiles') {
-        S.attempt = new Array(targetWord().length).fill(null);
-        S.bank.forEach(function (x) { x.used = false; });
-      } else {
-        S.keyboardAttempt = '';
-      }
-      renderPracticePanel();
-    };
-
-    /* Keyboard mode click handler */
-    $('keyboard').onclick = function (e) {
-      if (S.phase !== 'listening' || S.mode !== 'keyboard') return;
-      var k = e.target.closest ? e.target.closest('.kb-key') : null;
-      if (!k) return;
-      var ltr = k.getAttribute('data-k');
-      var cap = targetWord().length;
-      if (ltr === 'DEL') {
-        S.keyboardAttempt = S.keyboardAttempt.slice(0, -1);
-      } else if (ltr && S.keyboardAttempt.length < cap) {
-        S.keyboardAttempt += ltr;
-      }
-      renderPracticePanel();
-    };
-
-    /* Voice Mode PTT */
-    var pttBtn = $('btnPtt');
-    var pttLabel = $('pttLabel');
-    var activeRec = null;
-
-    function beginPtt(e) {
-      if (e && e.cancelable) e.preventDefault();
-      if (S.phase !== 'listening' || S.mode !== 'voice' || S.pttActive) return;
-      S.pttActive = true;
-      S.keyboardAttempt = '';
-      pttBtn.classList.add('recording');
-      pttLabel.textContent = 'Listening letter by letter… release when done';
-      $('hearState').textContent = 'Listening to voice spelling…';
-
-      var STTCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!STTCtor) {
-        toast('Speech recognition unavailable');
-        return;
-      }
-
-      try {
-        var rec = new STTCtor();
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.lang = 'en-US';
-
-        rec.onresult = function (ev) {
-          var acc = '';
-          for (var i = ev.resultIndex; i < ev.results.length; i++) {
-            var r = ev.results[i];
-            if (r[0]) acc += ' ' + r[0].transcript;
-          }
-          var shown = acc.trim();
-          if (shown) {
-            $('hearState').textContent = 'Hearing: ' + shown;
-            var p = L.parseSpeech(shown);
-            var cap = targetWord().length;
-            if (p.letters) {
-              S.keyboardAttempt = p.letters.slice(0, cap);
-              renderPracticePanel();
-            }
-          }
-        };
-
-        activeRec = rec;
-        rec.start();
-        hud('hudMic', 'mic: ptt active', 'on');
-      } catch (err) {
-        toast('Could not start mic');
-      }
-    }
-
-    function endPtt(e) {
-      if (e && e.cancelable) e.preventDefault();
-      if (!S.pttActive) return;
-      S.pttActive = false;
-      pttBtn.classList.remove('recording');
-      pttLabel.textContent = 'Hold & spell letter by letter';
-      hud('hudMic', 'mic: off', '');
-
-      if (activeRec) {
-        try { activeRec.stop(); } catch (err) {}
-        activeRec = null;
-      }
-
-      global.setTimeout(function () {
-        if (S.phase !== 'listening') return;
-        var shown = $('hearState').textContent.replace('Hearing: ', '').trim();
-        var p = L.parseSpeech(shown);
-        var cap = targetWord().length;
-        if (p.letters) {
-          S.keyboardAttempt = p.letters.slice(0, cap);
-          renderPracticePanel();
-        }
-        if (S.keyboardAttempt.length > 0) {
-          check();
-        } else {
-          $('hearState').textContent = 'No letters heard. Try holding and saying letters clearly.';
-        }
-      }, 250);
-    }
-
-    if (pttBtn) {
-      pttBtn.onmousedown = beginPtt;
-      pttBtn.onmouseup = endPtt;
-      pttBtn.onmouseleave = endPtt;
-      pttBtn.ontouchstart = function (e) { beginPtt(e); };
-      pttBtn.ontouchend = function (e) { endPtt(e); };
-      pttBtn.ontouchcancel = function (e) { endPtt(e); };
-    }
 
     document.addEventListener('pointerdown', function once() {
       Speech.prime();
@@ -757,7 +646,16 @@
 
     global.addEventListener('beforeunload', function () {
       Camera.close();
+      stopRec();
     });
+  }
+
+  function boot() {
+    Speech.init();
+    bind();
+    renderWords();
+    renderLog();
+    showBanner('importErr', '');
 
     if (!Speech.ttsOk) showBanner('micWarn', 'Speech output is not available in this browser.');
     if (!Speech.sttOk && /iPhone|iPad|iPod/i.test(navigator.userAgent)) {
