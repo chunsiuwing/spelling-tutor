@@ -177,9 +177,31 @@
     toast(added + ' words added');
   }
 
-  /* ---------------------------------------------------------------
-   * practice screen
-   * ------------------------------------------------------------- */
+  function bind() {
+    $('btnPick').onclick = function () { $('filePdf').click(); };
+    $('drop').onclick = function (e) { if (e.target.tagName !== 'BUTTON') $('filePdf').click(); };
+    $('filePdf').onchange = function (e) { if (e.target.files[0]) importWords(e.target.files[0]); };
+
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      $('drop').addEventListener(ev, function (e) { e.preventDefault(); this.classList.add('over'); });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      $('drop').addEventListener(ev, function (e) { e.preventDefault(); this.classList.remove('over'); });
+    });
+    $('drop').addEventListener('drop', function (e) {
+      e.preventDefault();
+      $('drop').classList.remove('over');
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) importWords(f);
+    });
+
+    $('btnPaste').onclick = pasteWords;
+    $('pasteBox').onkeydown = function (e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        pasteWords();
+      }
+    };
   function setPhase(p) {
     S.phase = p;
     document.body.setAttribute('data-phase', p);
