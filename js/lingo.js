@@ -247,7 +247,17 @@
         if (dbl) { letters.push(L); dbl = false; }
         continue;
       }
-      if (flat.length >= 3) words.push(flat);
+      
+      /* If the student said a whole word or syllables instead of letter names
+       * (e.g. saying "in-for-ma-tion" or "butterfly"), expand each spoken
+       * character/syllable into its constituent letters so it still matches. */
+      if (flat.length >= 1) {
+        words.push(flat);
+        for (var c = 0; c < flat.length; c++) {
+          var ch = flat.charAt(c).toUpperCase();
+          if (/[A-Z]/.test(ch)) letters.push(ch);
+        }
+      }
       dbl = false;
     }
 
