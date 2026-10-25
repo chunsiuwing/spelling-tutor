@@ -887,7 +887,7 @@
     });
     $('drop').addEventListener('drop', function (e) {
       e.preventDefault();
-      $('drop'].classList.remove('over');
+      $('drop').classList.remove('over');
       var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
       if (f) importWords(f);
     });
