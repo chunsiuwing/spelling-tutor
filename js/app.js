@@ -937,42 +937,6 @@
       Camera.close();
     });
   }
-    $('btnPick').onclick = function () { $('filePdf').click(); };
-    $('drop').onclick = function (e) { if (e.target.tagName !== 'BUTTON') $('filePdf').click(); };
-    $('filePdf').onchange = function (e) { if (e.target.files[0]) importWords(e.target.files[0]); };
-
-    ['dragenter', 'dragover'].forEach(function (ev) {
-      $('drop').addEventListener(ev, function (e) { e.preventDefault(); this.classList.add('over'); });
-    });
-    ['dragleave', 'drop'].forEach(function (ev) {
-      $('drop').addEventListener(ev, function (e) { e.preventDefault(); this.classList.remove('over'); });
-    });
-    $('drop').addEventListener('drop', function (e) {
-      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) importWords(f);
-    });
-
-    $('btnPaste').onclick = pasteWords;
-
-    $('filter').oninput = function () { S.filter = this.value; renderWords(); };
-
-    $('btnAll').onclick = function () {
-      var f = S.filter.trim().toLowerCase();
-      S.words.forEach(function (w) {
-        if (!f || w.toLowerCase().indexOf(f) >= 0) S.selected[key(w)] = 1;
-      });
-      renderWords();
-    };
-    $('btnNone').onclick = function () { S.selected = Object.create(null); renderWords(); };
-
-    $('wordList').addEventListener('click', function (e) {
-      var b = e.target.closest ? e.target.closest('.chip') : null;
-      if (!b) return;
-      var k = key(b.getAttribute('data-w'));
-      if (S.selected[k]) delete S.selected[k]; else S.selected[k] = 1;
-      renderWords();
-    });
-
     $('btnStart').onclick = function () { Speech.prime(); startPractice(); };
     $('btnCheck').onclick = function () { Speech.prime(); check(); };
     $('btnHint').onclick = function () {
