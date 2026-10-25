@@ -3,7 +3,7 @@
  * style.css or js/*.  (Forgetting this is what kept stale CSS alive
  * in the last project.) */
 
-var VERSION = 'spellcoach-v25';
+var VERSION = 'spellcoach-v26';
 
 var SHELL = [
   './',
