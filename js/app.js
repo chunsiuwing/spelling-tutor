@@ -657,6 +657,75 @@
       startRec(S.token);
     };
 
+    /* Mode tabs wiring */
+    $('tabTiles').onclick = function () { setMode('tiles'); };
+    $('tabVoice').onclick = function () { setMode('voice'); };
+    $('tabKeyboard').onclick = function () { setMode('keyboard'); };
+
+    /* Tile bank & slot clicks */
+    var bankBox = $('bank');
+    var attemptBox = $('attempt');
+
+    bankBox.onclick = function (e) {
+      if (S.phase !== 'listening' || S.mode !== 'tiles') return;
+      var btn = e.target.closest ? e.target.closest('.tile-btn') : null;
+      if (!btn || btn.classList.contains('used')) return;
+      var id = parseInt(btn.getAttribute('data-id'), 10);
+      var item = S.bank.find(function (x) { return x.id === id; });
+      if (!item) return;
+
+      var targetLen = targetWord().length;
+      for (var i = 0; i < targetLen; i++) {
+        if (!S.attempt[i]) {
+          item.used = true;
+          S.attempt[i] = item;
+          renderPracticePanel();
+          break;
+        }
+      }
+    };
+
+    attemptBox.onclick = function (e) {
+      if (S.phase !== 'listening') return;
+      if (S.mode === 'tiles') {
+        var tile = e.target.closest ? e.target.closest('.slot-tile') : null;
+        if (!tile) return;
+        var slotIdx = parseInt(tile.getAttribute('data-slot'), 10);
+        if (isNaN(slotIdx) || !S.attempt[slotIdx]) return;
+
+        var removed = S.attempt[slotIdx];
+        S.attempt[slotIdx] = null;
+        if (removed) removed.used = false;
+        renderPracticePanel();
+      }
+    };
+
+    $('btnClearBank').onclick = function () {
+      if (S.phase !== 'listening') return;
+      if (S.mode === 'tiles') {
+        S.attempt = new Array(targetWord().length).fill(null);
+        S.bank.forEach(function (x) { x.used = false; });
+      } else {
+        S.keyboardAttempt = '';
+      }
+      renderPracticePanel();
+    };
+
+    /* Keyboard mode click handler */
+    $('keyboard').onclick = function (e) {
+      if (S.phase !== 'listening' || S.mode !== 'keyboard') return;
+      var k = e.target.closest ? e.target.closest('.kb-key') : null;
+      if (!k) return;
+      var ltr = k.getAttribute('data-k');
+      var cap = targetWord().length;
+      if (ltr === 'DEL') {
+        S.keyboardAttempt = S.keyboardAttempt.slice(0, -1);
+      } else if (ltr && S.keyboardAttempt.length < cap) {
+        S.keyboardAttempt += ltr;
+      }
+      renderPracticePanel();
+    };
+
     document.addEventListener('pointerdown', function once() {
       Speech.prime();
     }, { once: true });
