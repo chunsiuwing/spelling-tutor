@@ -117,74 +117,7 @@
 
         <div class="attempt" id="attempt" aria-live="polite"></div>
 
-        <p class="hear" id="hearState">Choose how to spell below:</p>
-
-        <!-- Mode selector tabs -->
-        <div class="mode-tabs">
-          <button class="mode-tab active" id="tabTiles" type="button">🧩 Letter Tiles</button>
-          <button class="mode-tab" id="tabVoice" type="button">🎤 Speak (PTT)</button>
-          <button class="mode-tab" id="tabKeyboard" type="button">⌨️ Keyboard</button>
-        </div>
-
-        <!-- Mode 1: Hangman / Letter Tiles -->
-        <div class="spelling-mode" id="modeTiles">
-          <div class="hangman-box">
-            <p class="hb-label">Available letters (drag or tap to place):</p>
-            <div class="bank" id="bank"></div>
-            <div class="controls-row">
-              <button class="btn tiny ghost" id="btnClearBank" type="button">Reset tiles</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Mode 2: Push-to-Talk Voice -->
-        <div class="spelling-mode" id="modeVoice" hidden>
-          <div class="ptt-wrap">
-            <button class="btn ptt-btn" id="btnPtt" type="button">
-              🎤 <span id="pttLabel">Hold &amp; spell out loud</span>
-            </button>
-          </div>
-          <p class="tiny">Hold the button, say each letter clearly, then release to check.</p>
-        </div>
-
-        <!-- Mode 3: On-screen Keyboard -->
-        <div class="spelling-mode" id="modeKeyboard" hidden>
-          <div class="keyboard" id="keyboard">
-            <div class="kb-row">
-              <button class="kb-key" type="button" data-k="Q">Q</button>
-              <button class="kb-key" type="button" data-k="W">W</button>
-              <button class="kb-key" type="button" data-k="E">E</button>
-              <button class="kb-key" type="button" data-k="R">R</button>
-              <button class="kb-key" type="button" data-k="T">T</button>
-              <button class="kb-key" type="button" data-k="Y">Y</button>
-              <button class="kb-key" type="button" data-k="U">U</button>
-              <button class="kb-key" type="button" data-k="I">I</button>
-              <button class="kb-key" type="button" data-k="O">O</button>
-              <button class="kb-key" type="button" data-k="P">P</button>
-            </div>
-            <div class="kb-row">
-              <button class="kb-key" type="button" data-k="A">A</button>
-              <button class="kb-key" type="button" data-k="S">S</button>
-              <button class="kb-key" type="button" data-k="D">D</button>
-              <button class="kb-key" type="button" data-k="F">F</button>
-              <button class="kb-key" type="button" data-k="G">G</button>
-              <button class="kb-key" type="button" data-k="H">H</button>
-              <button class="kb-key" type="button" data-k="J">J</button>
-              <button class="kb-key" type="button" data-k="K">K</button>
-              <button class="kb-key" type="button" data-k="L">L</button>
-            </div>
-            <div class="kb-row">
-              <button class="kb-key" type="button" data-k="Z">Z</button>
-              <button class="kb-key" type="button" data-k="X">X</button>
-              <button class="kb-key" type="button" data-k="C">C</button>
-              <button class="kb-key" type="button" data-k="V">V</button>
-              <button class="kb-key" type="button" data-k="B">B</button>
-              <button class="kb-key" type="button" data-k="N">N</button>
-              <button class="kb-key" type="button" data-k="M">M</button>
-              <button class="kb-key" type="button" data-k="DEL">⌫</button>
-            </div>
-          </div>
-        </div>
+        <p class="hear" id="hearState">Listen carefully — the word is read once.</p>
 
         <div class="feedback" id="feedback" hidden aria-live="polite"></div>
 
