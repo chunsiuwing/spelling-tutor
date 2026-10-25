@@ -1,10 +1,5 @@
 /* =====================================================================
- * app.js — state machine and UI wiring.
- *
- * Setup  : import a PDF (or paste words) -> tick the words to revise
- * Run    : hear the word ONCE -> spell it out loud -> get an answer
- * Never  : the target word is not written on screen until it has been
- *          answered (or finally revealed as a hint).
+ * app.js — SpellCoach state machine and UI wiring.
  * ===================================================================== */
 (function (global) {
   'use strict';
@@ -13,7 +8,7 @@
   var L = global.Lingo;
 
   var S = {
-    words: [],            // every word imported, in source order
+    words: [],
     selected: Object.create(null),
     filter: '',
     queue: [],
@@ -21,22 +16,18 @@
     round: 0,
     attempt: [],
     bank: [],
-    mode: 'tiles',        // tiles | voice | keyboard
+    mode: 'tiles', // tiles | voice | keyboard
     keyboardAttempt: '',
     phase: 'setup',
     results: [],
     log: [],
-    rec: null,
-    pttRec: null,
-    pttActive: false,
     token: 0,
     lastCoach: null,
-    praiseCount: 0
+    praiseCount: 0,
+    pttRec: null,
+    pttActive: false
   };
 
-  /* ---------------------------------------------------------------
-   * tiny helpers
-   * ------------------------------------------------------------- */
   function delay(ms) { return new Promise(function (r) { global.setTimeout(r, ms); }); }
   function key(w) { return String(w).toLowerCase(); }
   function selectedCount() { return Object.keys(S.selected).length; }
@@ -67,7 +58,7 @@
   }
 
   /* ---------------------------------------------------------------
-   * word list (setup screen)
+   * word list setup
    * ------------------------------------------------------------- */
   function renderWords() {
     var box = $('wordList');
@@ -119,9 +110,6 @@
     return added;
   }
 
-  /* ---------------------------------------------------------------
-   * import
-   * ------------------------------------------------------------- */
   function importStatus(msg, pct) {
     var el = $('importStatus');
     if (!msg) { el.hidden = true; return; }
@@ -181,14 +169,14 @@
   }
 
   /* ---------------------------------------------------------------
-   * practice screen
+   * practice state & rendering
    * ------------------------------------------------------------- */
   function setPhase(p) {
     S.phase = p;
     document.body.setAttribute('data-phase', p);
     var st = $('stageState');
     if (p === 'presenting') st.textContent = 'Listen carefully…';
-    else if (p === 'listening') st.textContent = 'Now spell it out loud.';
+    else if (p === 'listening') st.textContent = 'Spell the word below.';
     else if (p === 'checking') st.textContent = 'Checking…';
     else if (p === 'feedback') st.textContent = 'Here is my answer.';
     updateControls();
@@ -199,9 +187,7 @@
     var check = $('btnCheck');
     check.disabled = !listening;
     check.classList.toggle('hot', listening);
-    check.innerHTML = listening
-      ? '<span class="pulse"></span>I\'m finished — check'
-      : 'I\'m finished — check';
+    check.innerHTML = 'I&rsquo;m finished — check';
     $('btnSkip').disabled = (S.phase === 'checking');
     $('btnQuit').disabled = (S.phase === 'checking');
     $('btnHint').disabled = !S.lastCoach || !S.lastCoach.speakHint;
@@ -316,75 +302,11 @@
     $('progBar').firstElementChild.style.width = ((S.idx) / total) * 100 + '%';
   }
 
-  /* ---------------------------------------------------------------
-   * the loop
-   * ------------------------------------------------------------- */
-  function stopRec() {
-    if (S.rec) { try { S.rec.stop(); } catch (e) {} S.rec = null; }
-    hud('hudMic', 'mic: off', '');
-  }
-
-  function startRec(myToken) {
-    stopRec();
-    if (!Speech.sttOk) {
-      showBanner('micWarn', 'This browser has no speech recognition. Try Chrome or Edge.');
-      return;
-    }
-    var rec = Speech.recognizer({
-      onFinal: function (txt) {
-        if (myToken !== S.token || S.phase !== 'listening') return;
-        S.raw += ' ' + txt;
-        var p = L.parseSpeech(txt);
-        var cap = targetWord().length + 8;
-
-        if (p.letters) {
-          S.attempt = (S.attempt + p.letters).slice(0, cap);
-          renderAttempt();
-        } else if (!S.attempt && p.words.length) {
-          /* No separate letters heard — the student probably said the
-           * whole word.  Take the longest thing they actually said so
-           * it still gets judged instead of being thrown away.        */
-          var long = p.words.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
-          if (long.length >= 3) {
-            S.attempt = long.toUpperCase().slice(0, cap);
-            renderAttempt();
-          }
-        }
-
-        if (p.commands.indexOf('check') >= 0) check();
-        else if (p.commands.indexOf('skip') >= 0) skip();
-      },
-      onInterim: function (txt) {
-        if (myToken !== S.token || S.phase !== 'listening') return;
-        var el = $('hearState');
-        el.textContent = txt.trim() ? 'Hearing: ' + txt.trim() : 'Listening…';
-      },
-      onStart: function () {
-        if (myToken !== S.token) return;
-        showBanner('micWarn', '');
-        hud('hudMic', 'mic: listening', 'on');
-        $('hearState').textContent = 'Listening… say each letter with a small pause.';
-      },
-      onDenied: function () {
-        if (myToken !== S.token) return;
-        hud('hudMic', 'mic: blocked', 'bad');
-        showBanner('micWarn', 'The microphone is blocked. Tap the padlock in the address bar, allow the microphone, then press "Try microphone again".');
-        $('btnRetryMic').hidden = false;
-        setPhase('blocked');
-        setFeedback('<b>Microphone needed.</b> Allow it, then try again.', 'warn');
-      },
-      onStop: function () {
-        if (myToken !== S.token) return;
-        hud('hudMic', 'mic: off', '');
-      },
-      onError: function () { /* transient — recogniser restarts itself */ }
-    });
-    S.rec = rec;
-    if (rec) rec.start();
-  }
-
   function targetWord() { return S.queue[S.idx] || ''; }
 
+  /* ---------------------------------------------------------------
+   * practice flow
+   * ------------------------------------------------------------- */
   function presentWord() {
     S.round = 0;
     S.lastCoach = null;
@@ -413,23 +335,22 @@
 
   function check() {
     if (S.phase !== 'listening') return;
-    var my = S.token;
     setPhase('checking');
-    stopRec();
 
     var target = targetWord();
-    if (!S.attempt) {                              /* said the whole word? */
-      var raw = (S.raw || '').replace(/[^a-zA-Z]/g, '').toUpperCase();
-      if (raw === target.toUpperCase()) S.attempt = raw;
+    var attemptStr = '';
+    if (S.mode === 'tiles') {
+      attemptStr = S.attempt.map(function (x) { return x ? x.ch : ''; }).join('');
+    } else {
+      attemptStr = S.keyboardAttempt;
     }
 
-    var res = L.judge(S.attempt, target);
+    var res = L.judge(attemptStr, target);
     var coach = L.coach(res, S.round + 1);
     S.lastCoach = coach;
 
     setPhase('feedback');
     setHintPill(res, S.round + 1);
-    renderAttempt(res, coach);
 
     var screen = coach.screen;
     if (coach.correct) {
@@ -438,7 +359,7 @@
         (S.round + 1) + (S.round ? ' tries' : ' try'));
       S.praiseCount++;
     } else if (res.empty) {
-      pushLog('–', 'nothing heard', 'warn', '');
+      pushLog('–', 'nothing answered', 'warn', '');
     } else {
       pushLog('✗', res.attempt, 'bad', L.describeWrong(res));
     }
@@ -448,17 +369,14 @@
     Speech.speak(coach.speech, { rate: coach.correct ? 0.95 : 0.8 })
       .then(function () { return delay(450); })
       .then(function () {
-        if (my !== S.token) return;
         if (coach.correct) { S.results.push({ word: target, status: 'ok' }); nextWord(); return; }
         if (coach.advance) { S.results.push({ word: target, status: 'reveal' }); nextWord(); return; }
         S.round++;
-        S.attempt = '';
-        S.raw = '';
+        initBank(target);
         setFeedback('');
         setHintPill(null);
         setPhase('listening');
-        renderAttempt();
-        startRec(my);
+        renderPracticePanel();
       });
   }
 
@@ -470,18 +388,22 @@
   }
 
   function nextWord() {
-    stopRec();
     S.idx++;
     if (S.idx >= S.queue.length) { finish(); return; }
     presentWord();
   }
 
   function finish() {
-    stopRec();
     S.token++;
-    setPhase('done');
-    updateProgress();
-    $('progBar').firstElementChild.style.width = '100%';
+    Speech.stop();
+    Camera.close();
+    hud('hudCam', 'camera: off', '');
+    hud('hudMic', 'mic: off', '');
+    $('summary').hidden = false;
+    document.body.classList.add('modal-open');
+    $('practice').hidden = true;
+    $('setup').hidden = false;
+    document.body.setAttribute('data-phase', 'setup');
 
     var ok = S.results.filter(function (r) { return r.status === 'ok'; }).length;
     var rev = S.results.filter(function (r) { return r.status === 'reveal'; }).length;
@@ -510,8 +432,6 @@
     $('sumList').innerHTML = html;
     $('btnAgain').hidden = !needs.length;
 
-    $('summary').hidden = false;
-    document.body.classList.add('modal-open');
     Speech.speak(line + tail, { rate: 0.9 });
     pushLog('■', 'session finished', 'mute', ok + '/' + total);
   }
@@ -575,7 +495,6 @@
 
   function endSession() {
     S.token++;
-    stopRec();
     Speech.stop();
     Camera.close();
     hud('hudCam', 'camera: off', '');
@@ -602,9 +521,15 @@
   }
 
   /* ---------------------------------------------------------------
-   * wiring
+   * Event wiring
    * ------------------------------------------------------------- */
-  function bind() {
+  function boot() {
+    Speech.init();
+    renderWords();
+    renderLog();
+    showBanner('importErr', '');
+
+    /* Setup screen controls */
     $('btnPick').onclick = function () { $('filePdf').click(); };
     $('drop').onclick = function (e) { if (e.target.tagName !== 'BUTTON') $('filePdf').click(); };
     $('filePdf').onchange = function (e) { if (e.target.files[0]) importWords(e.target.files[0]); };
@@ -616,11 +541,19 @@
       $('drop').addEventListener(ev, function (e) { e.preventDefault(); this.classList.remove('over'); });
     });
     $('drop').addEventListener('drop', function (e) {
+      e.preventDefault();
+      $('drop').classList.remove('over');
       var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
       if (f) importWords(f);
     });
 
     $('btnPaste').onclick = pasteWords;
+    $('pasteBox').onkeydown = function (e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        pasteWords();
+      }
+    };
 
     $('filter').oninput = function () { S.filter = this.value; renderWords(); };
 
@@ -633,29 +566,24 @@
     };
     $('btnNone').onclick = function () { S.selected = Object.create(null); renderWords(); };
 
-    $('wordList').addEventListener('click', function (e) {
+    $('wordList').onclick = function (e) {
       var b = e.target.closest ? e.target.closest('.chip') : null;
       if (!b) return;
       var k = key(b.getAttribute('data-w'));
       if (S.selected[k]) delete S.selected[k]; else S.selected[k] = 1;
       renderWords();
-    });
+    };
 
     $('btnStart').onclick = function () { Speech.prime(); startPractice(); };
     $('btnCheck').onclick = function () { Speech.prime(); check(); };
     $('btnHint').onclick = function () {
       if (S.lastCoach) Speech.speak(S.lastCoach.speech, { rate: 0.8 });
     };
+
     $('btnSkip').onclick = function () { Speech.prime(); skip(); };
     $('btnQuit').onclick = function () { Speech.prime(); endSession(); };
     $('btnClose').onclick = endSession;
     $('btnAgain').onclick = function () { Speech.prime(); again(); };
-    $('btnRetryMic').onclick = function () {
-      showBanner('micWarn', '');
-      $('btnRetryMic').hidden = true;
-      setPhase('listening');
-      startRec(S.token);
-    };
 
     /* Mode tabs wiring */
     $('tabTiles').onclick = function () { setMode('tiles'); };
@@ -726,6 +654,97 @@
       renderPracticePanel();
     };
 
+    /* Voice Mode PTT */
+    var pttBtn = $('btnPtt');
+    var pttLabel = $('pttLabel');
+    var activeRec = null;
+
+    function beginPtt(e) {
+      if (e && e.cancelable) e.preventDefault();
+      if (S.phase !== 'listening' || S.mode !== 'voice' || S.pttActive) return;
+      S.pttActive = true;
+      S.keyboardAttempt = '';
+      pttBtn.classList.add('recording');
+      pttLabel.textContent = 'Listening letter by letter… release when done';
+      $('hearState').textContent = 'Listening to voice spelling…';
+
+      var STTCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!STTCtor) {
+        toast('Speech recognition unavailable');
+        return;
+      }
+
+      try {
+        var rec = new STTCtor();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        rec.onresult = function (ev) {
+          var acc = '';
+          for (var i = ev.resultIndex; i < ev.results.length; i++) {
+            var r = ev.results[i];
+            if (r[0]) acc += ' ' + r[0].transcript;
+          }
+          var shown = acc.trim();
+          if (shown) {
+            $('hearState').textContent = 'Hearing: ' + shown;
+            var p = L.parseSpeech(shown);
+            var cap = targetWord().length;
+            if (p.letters) {
+              S.keyboardAttempt = p.letters.slice(0, cap);
+              renderPracticePanel();
+            }
+          }
+        };
+
+        activeRec = rec;
+        rec.start();
+        hud('hudMic', 'mic: ptt active', 'on');
+      } catch (err) {
+        toast('Could not start mic');
+      }
+    }
+
+    function endPtt(e) {
+      if (e && e.cancelable) e.preventDefault();
+      if (!S.pttActive) return;
+      S.pttActive = false;
+      pttBtn.classList.remove('recording');
+      pttLabel.textContent = 'Hold & spell letter by letter';
+      hud('hudMic', 'mic: off', '');
+
+      if (activeRec) {
+        try { activeRec.stop(); } catch (err) {}
+        activeRec = null;
+      }
+
+      global.setTimeout(function () {
+        if (S.phase !== 'listening') return;
+        var shown = $('hearState').textContent.replace('Hearing: ', '').trim();
+        var p = L.parseSpeech(shown);
+        var cap = targetWord().length;
+        if (p.letters) {
+          S.keyboardAttempt = p.letters.slice(0, cap);
+          renderPracticePanel();
+        }
+        if (S.keyboardAttempt.length > 0) {
+          check();
+        } else {
+          $('hearState').textContent = 'No letters heard. Try holding and saying letters clearly.';
+        }
+      }, 250);
+    }
+
+    if (pttBtn) {
+      pttBtn.onmousedown = beginPtt;
+      pttBtn.onmouseup = endPtt;
+      pttBtn.onmouseleave = endPtt;
+      pttBtn.ontouchstart = function (e) { beginPtt(e); };
+      pttBtn.ontouchend = function (e) { endPtt(e); };
+      pttBtn.ontouchcancel = function (e) { endPtt(e); };
+    }
+
     document.addEventListener('pointerdown', function once() {
       Speech.prime();
     }, { once: true });
@@ -738,16 +757,7 @@
 
     global.addEventListener('beforeunload', function () {
       Camera.close();
-      stopRec();
     });
-  }
-
-  function boot() {
-    Speech.init();
-    bind();
-    renderWords();
-    renderLog();
-    showBanner('importErr', '');
 
     if (!Speech.ttsOk) showBanner('micWarn', 'Speech output is not available in this browser.');
     if (!Speech.sttOk && /iPhone|iPad|iPod/i.test(navigator.userAgent)) {
