@@ -477,9 +477,8 @@
         }
       });
     }).then(function (mode) {
-      Camera.run(video, $('overlay'), function (present) {
-        hud('hudCam', present ? 'camera: tracking you' : 'camera: no one in view',
-          present ? 'on' : 'bad');
+      Camera.run(video, $('overlay'), function (present, m) {
+        hud('hudCam', 'cam: ' + m + ' (' + (present ? 'active' : 'step in') + ')', present ? 'on' : 'bad');
       });
     }).catch(function (err) {
       hud('hudCam', 'camera: off', 'bad');
